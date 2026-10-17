@@ -1,0 +1,36 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local backend settings saved from the Model dialog
+backend/focusnote.config.json
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# User documents: only the generated sample is tracked
+*.pdf
+!samples/kalici-ogrenme.pdf
+
+# Model files and caches
+*.gguf
+*.safetensors
+*.bin
+models/
+.cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.tmp
+*.log
