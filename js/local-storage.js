@@ -23,6 +23,17 @@ const reqP = (req) => new Promise((resolve, reject) => {
   req.onerror = () => reject(req.error);
 });
 
+export const OPEN_TIMEOUT_MS = 4000;      // opening our own database
+export const MIGRATE_TIMEOUT_MS = 2500;   // the one-time move from the pre-rename database
+
+/** Rejects if `promise` has not settled within `ms` (IndexedDB requests can wait forever behind another tab). */
+function withTimeout(promise, ms, what) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${what} did not finish within ${ms / 1000} s`)), ms);
+    promise.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
 function openDb(name) {
   return new Promise((resolve, reject) => {
     if (!('indexedDB' in globalThis)) { reject(new Error('IndexedDB not supported')); return; }
@@ -35,7 +46,12 @@ function openDb(name) {
         if (def.index) os.createIndex(def.index, def.index);
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Another tab wants to delete or upgrade this database: step aside instead of blocking it.
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
     req.onblocked = () => reject(new Error('Database upgrade blocked by another tab'));
   });
@@ -104,12 +120,14 @@ export class Store {
 
   async open() {
     try {
-      const db = await openDb(this.name);
+      const db = await withTimeout(openDb(this.name), OPEN_TIMEOUT_MS, 'Opening local storage');
       this.backend = new IdbBackend(db);
       this.persistent = true;
       if (this.migrateFrom) {
-        try { this.migratedRows = await migrateLegacy(db, this.migrateFrom); }
-        catch (e) { console.warn('Could not migrate data from the previous database', e); }
+        // Never let the one-time move hold up the app: an old tab can keep the old database
+        // busy indefinitely. If it times out, it is simply tried again on the next start.
+        try { this.migratedRows = await withTimeout(migrateLegacy(db, this.migrateFrom), MIGRATE_TIMEOUT_MS, 'Moving data from FocusNote'); }
+        catch (e) { this.migrationError = e; console.warn('Could not migrate data from the previous database', e); }
       }
     } catch (e) {
       this.backend = new MemoryBackend();

@@ -348,6 +348,7 @@ function showViewerMessage(title, text, kind = '') {
 }
 
 async function openDocument({ data, name, isSample = false }) {
+  await state.ready;   // a document opened during start-up waits for local storage
   if (state.demo && !isSample) exitDemo({ silent: true });
   await endSession();
   clearBanner('notext');
@@ -976,20 +977,24 @@ window.addEventListener('drop', (e) => {
 // ------------------------------------------------------------------ start
 
 async function init() {
+  // The model check and the schema do not depend on local storage: start them first,
+  // so a slow or blocked IndexedDB can never hide the model status.
+  checkModel();
+  loadSchema().catch((e) => toast(e.message, 'error'));
   state.store = await new Store().open();
   if (state.store.migratedRows) toast(`Your notes and sessions were moved from FocusNote to PiCODE (${state.store.migratedRows} records).`);
   if (!state.store.persistent) {
-    setBanner('storage', { kind: 'warn', text: 'Browser storage (IndexedDB) is unavailable — notes and sessions will only last until this page is closed.' });
+    setBanner('storage', { kind: 'warn', text: `Browser storage is unavailable (${state.store.error?.message ?? 'unknown reason'}) — notes and sessions will only last until this page is closed. Closing other PiCODE tabs and reloading usually fixes this.` });
   }
   state.consent = await state.store.getSetting('consent', null).catch(() => null);
   tracker.setConsent(state.consent === 'granted');
   renderAll();
-  loadSchema().catch((e) => toast(e.message, 'error'));
-  checkModel();
   if (state.consent === null) openDialog('dlg-consent');
 }
 
-init().catch((e) => {
+// Everything that touches storage (opening a document, saving notes) waits for this.
+// (Store#open never throws: it falls back to in-memory storage itself.)
+state.ready = init().catch((e) => {
   console.error(e);
   toast(`PiCODE failed to start: ${e.message}`, 'error');
 });

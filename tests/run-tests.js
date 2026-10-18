@@ -450,6 +450,42 @@ test('data from the pre-rename (FocusNote) database is moved once, then the old 
   indexedDB.deleteDatabase(dst);
 });
 
+test('an old tab holding the FocusNote database cannot freeze start-up', async () => {
+  const stamp = Date.now();
+  const legacyName = `focusnote-stuck-${stamp}`, newName = `picode-stuck-${stamp}`;
+  // An "old tab": legacy connection kept open with no versionchange handler (pre-fix code).
+  const legacy = await new Store(legacyName, { migrateFrom: null }).open();
+  await legacy.setSetting('consent', 'granted');
+  const oldTab = legacy.backend.db;
+  oldTab.onversionchange = null;
+  indexedDB.deleteDatabase(legacyName);   // a previous migration's delete, now blocked
+  const t0 = performance.now();
+  const s = await new Store(newName, { migrateFrom: legacyName }).open();
+  const ms = performance.now() - t0;
+  try {
+    ok(ms < 4000, `open() returned in ${Math.round(ms)} ms`);
+    ok(s.persistent, 'the app still gets its own persistent storage');
+    ok(s.migrationError, 'migration was skipped, to be retried next start');
+    await s.setSetting('x', 1);
+    eq(await s.getSetting('x'), 1, 'storage works');
+  } finally {
+    s.close();
+    oldTab.close();
+    indexedDB.deleteDatabase(newName);
+  }
+});
+
+test('our own connections step aside when another tab deletes the database', async () => {
+  const name = `picode-yield-${Date.now()}`;
+  const s = await new Store(name, { migrateFrom: null }).open();
+  const deleted = await Promise.race([
+    new Promise((r) => { const req = indexedDB.deleteDatabase(name); req.onsuccess = () => r(true); }),
+    new Promise((r) => setTimeout(() => r(false), 3000)),
+  ]);
+  ok(deleted, 'delete was not blocked by our open connection');
+  s.close();
+});
+
 test('note validation', () => {
   eq(validateNote(createNote({ docId: 'd', text: 'x', page: 1 })), []);
   ok(validateNote({ id: 'a', docId: 'd', text: 'x', page: 0, source: 'ai' }).length === 1);
@@ -525,7 +561,7 @@ test('branding: PiCODE everywhere, no model-status pill in the header', async ()
   ok(!html.includes('model-pill'), 'model status pill removed');
   for (const f of ['../js/app.js', '../js/notes-panel.js', '../js/local-storage.js', '../js/export.js']) {
     const src = await (await fetch(f, { cache: 'no-store' })).text();
-    ok(!/FocusNote/.test(src.replace(/moved from FocusNote|LEGACY_DB_NAME = 'focusnote'|before the app was renamed/g, '')), `${f} renamed`);
+    ok(!/FocusNote/.test(src.replace(/moved from FocusNote|Moving data from FocusNote|LEGACY_DB_NAME = 'focusnote'|before the app was renamed/g, '')), `${f} renamed`);
   }
 });
 
