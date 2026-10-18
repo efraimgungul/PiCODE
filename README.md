@@ -29,7 +29,7 @@ Built for Hacktoberfest Elazığ 2026. This project is not affiliated with or en
 
 Requirements: **Python 3.10+** and, for real AI analysis, **[Ollama](https://ollama.com)** with a Gemma 4 model. No Node.js, no build step, no cloud account.
 
-**Windows — one click:** double-click **`RUN.bat`**. It checks for and, if needed, installs everything (Python 3.12 and Ollama via `winget`, the `.venv` with the Python packages, the `gemma4:12b` model, about 8 GB), starts the Ollama server and PiCODE, and opens http://127.0.0.1:8000. If the model can't be installed, the site still opens and demo mode works. Options: `RUN.bat --no-start` (setup only); set `PICODE_MODEL`, `PICODE_PORT` or `PICODE_NO_BROWSER=1` before running.
+**Windows — one click:** double-click **`RUN.bat`**. It checks for and, if needed, installs everything (Python 3.12 and Ollama via `winget`, the `.venv` with the Python packages, the `gemma4:12b` model, about 8 GB), starts the Ollama server and PiCODE, and opens http://127.0.0.1:8000. If the model can't be installed, the site still opens and demo mode works. If PiCODE is already running it just opens the browser; if port 8000 is taken by another program it picks the next free port; when double-clicked, the window always stays open with a message instead of closing silently. The file is ASCII-only on purpose (no codepage issues) — don't re-save it as "UTF-8 with BOM". Options: `RUN.bat --no-start` (setup only); set `PICODE_MODEL`, `PICODE_PORT` or `PICODE_NO_BROWSER=1` before running.
 
 **Windows (PowerShell, manual)**
 

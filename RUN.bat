@@ -1,6 +1,5 @@
 @echo off
 setlocal EnableExtensions
-chcp 65001 >nul
 cd /d "%~dp0"
 
 rem ======================================================================
@@ -13,10 +12,14 @@ rem  4. Gemma 4 modeli (yoksa indirir, yaklasik 8 GB)
 rem  5. PiCODE sunucusu + tarayicida http://127.0.0.1:8000
 rem
 rem  Secenekler:
-rem    RUN.bat --no-start        sadece kurulum, siteyi baslatmaz
-rem    set PICODE_MODEL=...   baska bir Gemma 4 etiketi kullan
-rem    set PICODE_PORT=...    baska bir port kullan (varsayilan 8000)
-rem    set PICODE_NO_BROWSER=1  tarayiciyi otomatik acma
+rem    RUN.bat --no-start          sadece kurulum, siteyi baslatmaz
+rem    set PICODE_MODEL=...        baska bir Gemma 4 etiketi kullan
+rem    set PICODE_PORT=...         baska bir port kullan (varsayilan 8000)
+rem    set PICODE_NO_BROWSER=1     tarayiciyi otomatik acma
+rem
+rem  Not: Bu dosya bilerek yalnizca ASCII karakter icerir (Turkce harf yok).
+rem  Boylece Windows kod sayfasina ve dosyanin kayit kodlamasina bagli
+rem  hatalar olusmaz. Not Defteri'nde "UTF-8 BOM" ile KAYDETMEYIN.
 rem ======================================================================
 
 if not defined PICODE_MODEL set "PICODE_MODEL=gemma4:12b"
@@ -27,6 +30,13 @@ set "APP_URL=http://127.0.0.1:%PICODE_PORT%"
 rem Bu dosya kendini arka planda tarayici acmak icin de cagirir.
 if "%~1"=="__open_browser" goto open_browser
 
+rem Cift tiklandiysa pencere hata ya da bitis mesajinda kapanmasin.
+rem (Komut satiri gecikmeli genisletmeyle okunur; icindeki & veya > gibi karakterler calistirilmaz.)
+set "INTERACTIVE="
+setlocal EnableDelayedExpansion
+set "CMDLINE=!cmdcmdline!"
+if /i not "!CMDLINE:%~nx0=!"=="!CMDLINE!" (endlocal & set "INTERACTIVE=1") else endlocal
+
 set "NO_START="
 if /i "%~1"=="--no-start" set "NO_START=1"
 set "HAVE_WINGET="
@@ -36,7 +46,7 @@ set "MODEL_READY="
 title PiCODE
 echo.
 echo  ==============================================
-echo    PiCODE - kurulum ve başlatma
+echo    PiCODE - kurulum ve baslatma
 echo  ==============================================
 echo.
 
@@ -44,7 +54,7 @@ rem ---------------------------------------------------------------- 1. Python
 echo [1/5] Python kontrol ediliyor...
 call :find_python
 if defined PY goto python_found
-echo       Python bulunamadı.
+echo       Python bulunamadi.
 if not defined HAVE_WINGET goto no_python
 echo       winget ile Python 3.12 kuruluyor...
 winget install -e --id Python.Python.3.12 --scope user --accept-package-agreements --accept-source-agreements
@@ -55,20 +65,20 @@ if not defined PY goto no_python
 for /f "delims=" %%V in ('%PY% --version 2^>^&1') do echo       %%V bulundu.
 
 rem ---------------------------------------------------------------- 2. venv + paketler
-echo [2/5] Python paketleri kuruluyor...
+echo [2/5] Python paketleri kontrol ediliyor...
 if exist ".venv\Scripts\python.exe" goto venv_ready
-echo       Sanal ortam oluşturuluyor: .venv
+echo       Sanal ortam olusturuluyor: .venv
 %PY% -m venv .venv || goto fail_venv
 :venv_ready
 set "VPY=%CD%\.venv\Scripts\python.exe"
 "%VPY%" -m pip install --disable-pip-version-check -q -r backend\requirements.txt || goto fail_pip
-echo       fastapi, uvicorn, httpx hazır.
+echo       fastapi, uvicorn, httpx hazir.
 
 rem ---------------------------------------------------------------- 3. Ollama
 echo [3/5] Ollama kontrol ediliyor...
 call :find_ollama
 if defined OLLAMA goto ollama_found
-echo       Ollama bulunamadı.
+echo       Ollama bulunamadi.
 if not defined HAVE_WINGET goto no_ollama
 echo       winget ile Ollama kuruluyor...
 winget install -e --id Ollama.Ollama --accept-package-agreements --accept-source-agreements
@@ -78,7 +88,7 @@ if not defined OLLAMA goto no_ollama
 echo       Ollama: %OLLAMA%
 
 curl -s -f "%OLLAMA_URL%/api/tags" >nul 2>&1 && goto ollama_running
-echo       Ollama sunucusu başlatılıyor...
+echo       Ollama sunucusu baslatiliyor...
 start "Ollama" /min "%OLLAMA%" serve
 set /a TRIES=0
 :wait_ollama
@@ -86,58 +96,93 @@ ping -n 2 127.0.0.1 >nul
 curl -s -f "%OLLAMA_URL%/api/tags" >nul 2>&1 && goto ollama_running
 set /a TRIES+=1
 if %TRIES% lss 45 goto wait_ollama
-echo       UYARI: Ollama 45 saniye içinde yanıt vermedi. Site demo modunda açılacak.
+echo       UYARI: Ollama 45 saniye icinde yanit vermedi. Site demo modunda acilacak.
 goto start_app
 :ollama_running
-echo       Ollama sunucusu çalışıyor: %OLLAMA_URL%
+echo       Ollama sunucusu calisiyor: %OLLAMA_URL%
 
 rem ---------------------------------------------------------------- 4. Gemma 4 modeli
 echo [4/5] Model kontrol ediliyor: %PICODE_MODEL%
 "%OLLAMA%" list 2>nul | findstr /b /c:"%PICODE_MODEL% " >nul && goto model_found
-echo       Model yüklü değil, indiriliyor. Bu işlem yaklaşık 8 GB indirir ve sürebilir...
-echo       Not: 12B model için yaklaşık 8 GB boş bellek önerilir.
+echo       Model yuklu degil, indiriliyor. Bu islem yaklasik 8 GB indirir ve surebilir...
+echo       Not: 12B model icin yaklasik 8 GB bos bellek onerilir.
 "%OLLAMA%" pull %PICODE_MODEL%
 if errorlevel 1 goto model_failed
 :model_found
 set "MODEL_READY=1"
-echo       %PICODE_MODEL% hazır.
+echo       %PICODE_MODEL% hazir.
 goto start_app
 :model_failed
-echo       UYARI: Model indirilemedi. İnternet bağlantınızı ve model adını kontrol edin.
-echo       Site yine açılır; yapay zeka analizi yerine demo modunu kullanabilirsiniz.
+echo       UYARI: Model indirilemedi. Internet baglantinizi ve model adini kontrol edin.
+echo       Site yine acilir; yapay zeka analizi yerine demo modunu kullanabilirsiniz.
 
 rem ---------------------------------------------------------------- 5. PiCODE
 :start_app
 if defined NO_START goto setup_done
-echo [5/5] PiCODE başlatılıyor...
+echo [5/5] PiCODE baslatiliyor...
+
+rem PiCODE bu portta zaten calisiyorsa yeni sunucu acma, sadece tarayiciyi ac.
 curl -s -f "%APP_URL%/api/config" >nul 2>&1 && goto already_running
+
+rem Port baska bir program tarafindan kullaniliyorsa sonraki bos portu sec.
+call :port_busy %PICODE_PORT%
+if not defined BUSY goto port_ok
+echo       %PICODE_PORT% portu baska bir program tarafindan kullaniliyor; bos port araniyor...
+set /a TRY_PORT=%PICODE_PORT%
+set /a LAST_PORT=%PICODE_PORT%+20
+:next_port
+set /a TRY_PORT+=1
+if %TRY_PORT% gtr %LAST_PORT% goto no_port
+call :port_busy %TRY_PORT%
+if defined BUSY goto next_port
+set "PICODE_PORT=%TRY_PORT%"
+set "APP_URL=http://127.0.0.1:%PICODE_PORT%"
+echo       Bos port bulundu: %PICODE_PORT%
+:port_ok
 
 if not defined PICODE_NO_BROWSER start "" /b "%~f0" __open_browser
 echo.
 echo  ----------------------------------------------
 echo    PiCODE:  %APP_URL%
-if defined MODEL_READY echo    Model:      %PICODE_MODEL% - Ollama üzerinden
-if not defined MODEL_READY echo    Model:      hazır değil, demo modu kullanılabilir
-echo    Durdurmak için bu pencerede Ctrl+C tuşlayın.
+if defined MODEL_READY echo    Model:   %PICODE_MODEL% (Ollama uzerinden)
+if not defined MODEL_READY echo    Model:   hazir degil - demo modu kullanilabilir
+echo    Tarayici birkac saniye icinde acilacak.
+echo    Durdurmak icin bu pencerede Ctrl+C tuslayin.
 echo  ----------------------------------------------
 echo.
 "%VPY%" -m uvicorn backend.app:app --host 127.0.0.1 --port %PICODE_PORT%
+set "EXIT_CODE=%ERRORLEVEL%"
 echo.
-echo PiCODE durduruldu.
-pause
-exit /b 0
+if "%EXIT_CODE%"=="0" (echo PiCODE durduruldu.) else (echo HATA: PiCODE sunucusu kapandi ^(kod %EXIT_CODE%^). Yukaridaki mesaji kontrol edin.)
+call :hold
+exit /b %EXIT_CODE%
 
 :already_running
-echo       PiCODE zaten çalışıyor: %APP_URL%
-if not defined PICODE_NO_BROWSER start "" "%APP_URL%"
+echo       PiCODE zaten calisiyor: %APP_URL%
+echo       Baska bir pencerede ya da arka planda acik; yeni sunucu baslatilmadi.
+if not defined PICODE_NO_BROWSER (
+  start "" "%APP_URL%"
+  echo       Tarayici acildi.
+)
+echo       Kapatmak icin PiCODE'un calistigi diger pencerede Ctrl+C tuslayin.
+call :hold
 exit /b 0
 
 :setup_done
 echo.
-echo Kurulum tamamlandı. Başlatmak için: RUN.bat
+echo Kurulum tamamlandi. Baslatmak icin: RUN.bat
+call :hold
 exit /b 0
 
-rem ================================================================ yardımcılar
+rem ================================================================ yardimcilar
+
+:hold
+rem Cift tiklamayla acildiysa pencereyi acik tut; komut satirindan calistirildiysa bekleme.
+if defined INTERACTIVE (
+  echo.
+  pause
+)
+goto :eof
 
 :find_python
 set "PY="
@@ -155,8 +200,14 @@ for /f "delims=" %%P in ('where ollama 2^>nul') do if not defined OLLAMA set "OL
 if not defined OLLAMA if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "OLLAMA=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
 goto :eof
 
+:port_busy
+rem BUSY=1 ise verilen TCP portunda dinleyen bir program var.
+set "BUSY="
+netstat -ano -p tcp | findstr /c:":%~1 " | findstr /c:"LISTENING" >nul && set "BUSY=1"
+goto :eof
+
 :open_browser
-rem Sunucu yanıt verene kadar bekler (en fazla 60 sn), sonra tarayıcıyı açar.
+rem Sunucu yanit verene kadar bekler (en fazla 60 sn), sonra tarayiciyi acar.
 for /l %%i in (1,1,60) do (
   curl -s -f "%APP_URL%/api/config" >nul 2>&1 && (
     start "" "%APP_URL%"
@@ -168,32 +219,40 @@ exit /b 0
 
 rem ================================================================ hatalar
 
+:no_port
+echo.
+echo HATA: %PICODE_PORT% ile %LAST_PORT% arasinda bos port bulunamadi.
+echo       Baska bir port deneyin:  set PICODE_PORT=9000  ve ardindan RUN.bat
+call :hold
+exit /b 1
+
 :no_python
 echo.
-echo HATA: Python 3.10 veya üstü bulunamadı ve otomatik kurulamadı.
-echo       https://www.python.org/downloads/ adresinden kurun, ardından RUN.bat'ı tekrar çalıştırın.
-pause
+echo HATA: Python 3.10 veya ustu bulunamadi ve otomatik kurulamadi.
+echo       https://www.python.org/downloads/ adresinden kurun, ardindan RUN.bat'i tekrar calistirin.
+echo       Python yeni kurulduysa bu pencereyi kapatip RUN.bat'i bir kez daha calistirin.
+call :hold
 exit /b 1
 
 :old_python
 echo.
-echo HATA: Python sürümü çok eski. PiCODE Python 3.10 veya üstünü gerektirir.
-pause
+echo HATA: Python surumu cok eski. PiCODE Python 3.10 veya ustunu gerektirir.
+call :hold
 exit /b 1
 
 :fail_venv
 echo.
-echo HATA: .venv sanal ortamı oluşturulamadı.
-pause
+echo HATA: .venv sanal ortami olusturulamadi.
+call :hold
 exit /b 1
 
 :fail_pip
 echo.
-echo HATA: Python paketleri kurulamadı. İnternet bağlantınızı kontrol edin.
-pause
+echo HATA: Python paketleri kurulamadi. Internet baglantinizi kontrol edin.
+call :hold
 exit /b 1
 
 :no_ollama
-echo       UYARI: Ollama kurulamadı. https://ollama.com/download adresinden kurabilirsiniz.
-echo       Site yine açılır; yapay zeka analizi yerine demo modunu kullanabilirsiniz.
+echo       UYARI: Ollama kurulamadi. https://ollama.com/download adresinden kurabilirsiniz.
+echo       Site yine acilir; yapay zeka analizi yerine demo modunu kullanabilirsiniz.
 goto start_app
