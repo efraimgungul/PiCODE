@@ -1,4 +1,4 @@
-// Talks to the FocusNote backend only (same origin). The backend owns the
+// Talks to the PiCODE backend only (same origin). The backend owns the
 // model endpoint, credentials and runtime-specific API, so this module is
 // independent of the model vendor.
 
@@ -16,7 +16,7 @@ async function request(path, options = {}) {
     res = await fetch(path, { cache: 'no-store', ...options });
   } catch (e) {
     if (e.name === 'AbortError') throw new ModelClientError('cancelled', 'Request cancelled.');
-    throw new ModelClientError('backend_unreachable', 'The FocusNote backend is not reachable. Is the server running?');
+    throw new ModelClientError('backend_unreachable', 'The PiCODE backend is not reachable. Is the server running?');
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

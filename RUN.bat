@@ -4,25 +4,25 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 rem ======================================================================
-rem  FocusNote - tek tikla kurulum ve baslatma (Windows)
+rem  PiCODE - tek tikla kurulum ve baslatma (Windows)
 rem
 rem  1. Python 3.10+ (yoksa winget ile Python 3.12 kurar)
 rem  2. .venv sanal ortami + backend\requirements.txt paketleri
 rem  3. Ollama (yoksa winget ile kurar) ve Ollama sunucusu
 rem  4. Gemma 4 modeli (yoksa indirir, yaklasik 8 GB)
-rem  5. FocusNote sunucusu + tarayicida http://127.0.0.1:8000
+rem  5. PiCODE sunucusu + tarayicida http://127.0.0.1:8000
 rem
 rem  Secenekler:
 rem    RUN.bat --no-start        sadece kurulum, siteyi baslatmaz
-rem    set FOCUSNOTE_MODEL=...   baska bir Gemma 4 etiketi kullan
-rem    set FOCUSNOTE_PORT=...    baska bir port kullan (varsayilan 8000)
-rem    set FOCUSNOTE_NO_BROWSER=1  tarayiciyi otomatik acma
+rem    set PICODE_MODEL=...   baska bir Gemma 4 etiketi kullan
+rem    set PICODE_PORT=...    baska bir port kullan (varsayilan 8000)
+rem    set PICODE_NO_BROWSER=1  tarayiciyi otomatik acma
 rem ======================================================================
 
-if not defined FOCUSNOTE_MODEL set "FOCUSNOTE_MODEL=gemma4:12b"
-if not defined FOCUSNOTE_PORT set "FOCUSNOTE_PORT=8000"
+if not defined PICODE_MODEL set "PICODE_MODEL=gemma4:12b"
+if not defined PICODE_PORT set "PICODE_PORT=8000"
 set "OLLAMA_URL=http://127.0.0.1:11434"
-set "APP_URL=http://127.0.0.1:%FOCUSNOTE_PORT%"
+set "APP_URL=http://127.0.0.1:%PICODE_PORT%"
 
 rem Bu dosya kendini arka planda tarayici acmak icin de cagirir.
 if "%~1"=="__open_browser" goto open_browser
@@ -33,10 +33,10 @@ set "HAVE_WINGET="
 where winget >nul 2>&1 && set "HAVE_WINGET=1"
 set "MODEL_READY="
 
-title FocusNote
+title PiCODE
 echo.
 echo  ==============================================
-echo    FocusNote - kurulum ve başlatma
+echo    PiCODE - kurulum ve başlatma
 echo  ==============================================
 echo.
 
@@ -92,44 +92,44 @@ goto start_app
 echo       Ollama sunucusu çalışıyor: %OLLAMA_URL%
 
 rem ---------------------------------------------------------------- 4. Gemma 4 modeli
-echo [4/5] Model kontrol ediliyor: %FOCUSNOTE_MODEL%
-"%OLLAMA%" list 2>nul | findstr /b /c:"%FOCUSNOTE_MODEL% " >nul && goto model_found
+echo [4/5] Model kontrol ediliyor: %PICODE_MODEL%
+"%OLLAMA%" list 2>nul | findstr /b /c:"%PICODE_MODEL% " >nul && goto model_found
 echo       Model yüklü değil, indiriliyor. Bu işlem yaklaşık 8 GB indirir ve sürebilir...
 echo       Not: 12B model için yaklaşık 8 GB boş bellek önerilir.
-"%OLLAMA%" pull %FOCUSNOTE_MODEL%
+"%OLLAMA%" pull %PICODE_MODEL%
 if errorlevel 1 goto model_failed
 :model_found
 set "MODEL_READY=1"
-echo       %FOCUSNOTE_MODEL% hazır.
+echo       %PICODE_MODEL% hazır.
 goto start_app
 :model_failed
 echo       UYARI: Model indirilemedi. İnternet bağlantınızı ve model adını kontrol edin.
 echo       Site yine açılır; yapay zeka analizi yerine demo modunu kullanabilirsiniz.
 
-rem ---------------------------------------------------------------- 5. FocusNote
+rem ---------------------------------------------------------------- 5. PiCODE
 :start_app
 if defined NO_START goto setup_done
-echo [5/5] FocusNote başlatılıyor...
+echo [5/5] PiCODE başlatılıyor...
 curl -s -f "%APP_URL%/api/config" >nul 2>&1 && goto already_running
 
-if not defined FOCUSNOTE_NO_BROWSER start "" /b "%~f0" __open_browser
+if not defined PICODE_NO_BROWSER start "" /b "%~f0" __open_browser
 echo.
 echo  ----------------------------------------------
-echo    FocusNote:  %APP_URL%
-if defined MODEL_READY echo    Model:      %FOCUSNOTE_MODEL% - Ollama üzerinden
+echo    PiCODE:  %APP_URL%
+if defined MODEL_READY echo    Model:      %PICODE_MODEL% - Ollama üzerinden
 if not defined MODEL_READY echo    Model:      hazır değil, demo modu kullanılabilir
 echo    Durdurmak için bu pencerede Ctrl+C tuşlayın.
 echo  ----------------------------------------------
 echo.
-"%VPY%" -m uvicorn backend.app:app --host 127.0.0.1 --port %FOCUSNOTE_PORT%
+"%VPY%" -m uvicorn backend.app:app --host 127.0.0.1 --port %PICODE_PORT%
 echo.
-echo FocusNote durduruldu.
+echo PiCODE durduruldu.
 pause
 exit /b 0
 
 :already_running
-echo       FocusNote zaten çalışıyor: %APP_URL%
-if not defined FOCUSNOTE_NO_BROWSER start "" "%APP_URL%"
+echo       PiCODE zaten çalışıyor: %APP_URL%
+if not defined PICODE_NO_BROWSER start "" "%APP_URL%"
 exit /b 0
 
 :setup_done
@@ -177,7 +177,7 @@ exit /b 1
 
 :old_python
 echo.
-echo HATA: Python sürümü çok eski. FocusNote Python 3.10 veya üstünü gerektirir.
+echo HATA: Python sürümü çok eski. PiCODE Python 3.10 veya üstünü gerektirir.
 pause
 exit /b 1
 

@@ -2,7 +2,7 @@
 // Pure rendering: all actions are delegated to handlers supplied by app.js.
 
 import { h, icon, timeAgo } from './dom.js';
-import { labelsFor, paragraphsOf } from './note-format.js';
+import { labelsFor, shortParagraphs } from './note-format.js';
 
 const pageRef = (page, onGo, L = labelsFor('en')) => h('button', {
   class: 'page-ref', type: 'button', title: `Go to page ${page}`, 'aria-label': `Go to page ${page}`,
@@ -22,8 +22,6 @@ function groundingTag(item, L) {
   if (item.grounding === 'approximate') return h('span', { class: 'chip warn', title: 'Most of the quote matches the PDF text, with small wording differences.' }, L.approximate);
   return null;
 }
-
-const paragraphs = (text) => paragraphsOf(text).map((p) => h('p', {}, p));
 
 /** [2,3,4,7] -> "2–4, 7" */
 function compactPages(pages) {
@@ -101,41 +99,37 @@ export function renderNotes(root, s) {
     ));
   }
 
-  // ---- the summary itself: ONE continuous text — overview, then every section in page order
-  const flow = h('div', { class: 'note-flow' }, ...paragraphs(note.overview));
+  // ---- Summary (collapsible): short overview, then one sub-headed part per section
+  const summaryBody = [h('div', { class: 'sum-overview' }, ...shortParagraphs(note.overview, { maxSentences: 3, maxWords: 60 }).map((p) => h('p', {}, p)))];
   for (const sec of note.sections) {
     const stats = s.pageStats?.get(sec.page) ?? {};
     const secs = Math.round(s.attention.get(sec.page) ?? 0);
-    const why = [L.depth[sec.depth],
-      stats.selections ? L.selectedTimes(stats.selections) : null,
-      stats.rereads ? L.rereadTimes(stats.rereads) : null,
-      secs >= 10 ? L.attention(L.duration(secs)) : null].filter(Boolean).join(' · ');
-    const paras = paragraphs(sec.content);
-    paras.forEach((p, i) => {
-      p.className = `flow-${sec.depth}`;
-      p.title = `${sec.heading} — ${why}`;
-      if (i === paras.length - 1) p.append(' ', pageRef(sec.page, () => hd.locate(sec.page, sec.evidence), L));
-    });
-    flow.append(...paras);
-  }
-  card.append(h('section', { class: 'note-block' }, h('h3', { class: 'note-label' }, L.summary), flow));
-  if (s.excluded?.length) card.append(h('p', { class: 'note-footnote' }, L.excluded(compactPages(s.excluded))));
-
-  // ---- details, collapsed
-  const sources = h('details', { class: 'note-details' }, h('summary', {}, L.sourcesTitle));
-  for (const sec of note.sections) {
-    const secs = Math.round(s.attention.get(sec.page) ?? 0);
-    const stats = s.pageStats?.get(sec.page) ?? {};
-    const locate = () => hd.locate(sec.page, sec.evidence);
-    sources.append(h('section', { class: `note-section depth-${sec.depth}` },
-      h('div', { class: 'note-section-head' }, h('h4', {}, sec.heading), pageRef(sec.page, hd.goToPage, L)),
+    summaryBody.push(h('section', { class: `sum-sec depth-${sec.depth}` },
+      h('h4', { class: 'sum-h' },
+        h('span', { class: 'sum-h-text' }, sec.heading),
+        pageRef(sec.page, () => hd.locate(sec.page, sec.evidence), L)),
       h('div', { class: 'note-meta' },
         h('span', { class: `depth-chip ${sec.depth}`, title: 'Detail level follows selections, re-reads and reading time on this page' }, L.depth[sec.depth]),
-        stats.rereads ? h('span', {}, L.rereadTimes(stats.rereads)) : null,
+        stats.selections ? h('span', { class: 'meta-crit' }, L.selectedTimes(stats.selections)) : null,
+        stats.rereads ? h('span', { class: 'meta-high' }, L.rereadTimes(stats.rereads)) : null,
         secs >= 10 ? h('span', {}, L.attention(L.duration(secs))) : null,
         groundingTag(sec, L)),
-      sec.keyPoints.length ? h('ul', { class: 'note-points', 'aria-label': L.keyPoints }, sec.keyPoints.map((k) => h('li', {}, k))) : null,
-      sec.grounding !== 'unverified' && sec.evidence
+      ...shortParagraphs(sec.content).map((p) => h('p', {}, p)),
+      sec.keyPoints.length ? h('ul', { class: 'sum-points', 'aria-label': L.keyPoints }, sec.keyPoints.map((k) => h('li', {}, k))) : null,
+    ));
+  }
+  if (s.excluded?.length) summaryBody.push(h('p', { class: 'note-footnote' }, L.excluded(compactPages(s.excluded))));
+  card.append(accordion('summary', L.summary, summaryBody, { open: true, count: note.sections.length }));
+
+  // ---- Sources and reading notes (collapsible)
+  const sources = [];
+  for (const sec of note.sections) {
+    const hasQuote = sec.grounding !== 'unverified' && sec.evidence;
+    if (!hasQuote && !sec.readerNote) continue;
+    const locate = () => hd.locate(sec.page, sec.evidence);
+    sources.push(h('section', { class: `note-section depth-${sec.depth}` },
+      h('div', { class: 'note-section-head' }, h('h4', {}, sec.heading), pageRef(sec.page, hd.goToPage, L)),
+      hasQuote
         ? h('blockquote', { class: 'note-quote', tabindex: 0, role: 'button', title: `${L.source}: ${L.page} ${sec.page}`,
             onclick: locate, onkeydown: (e) => { if (e.key === 'Enter') locate(); } }, sec.evidence)
         : null,
@@ -146,16 +140,16 @@ export function renderNotes(root, s) {
     ));
   }
   if (note.reviewLater.length) {
-    sources.append(h('section', { class: 'note-section' },
+    sources.push(h('section', { class: 'note-section' },
       h('h4', {}, L.review),
-      h('ul', { class: 'note-points' }, note.reviewLater.map((rv) => h('li', {}, pageRef(rv.page, hd.goToPage, L), ' ', rv.reason,
+      h('ul', { class: 'sum-points' }, note.reviewLater.map((rv) => h('li', {}, pageRef(rv.page, hd.goToPage, L), ' ', rv.reason,
         h('span', { class: 'chip', style: 'margin-left:6px' }, L.signal[rv.signal]))))));
   }
-  card.append(sources);
+  if (sources.length) card.append(accordion('sources', L.sourcesTitle, sources, { open: false }));
 
+  // ---- Self-test questions (collapsible)
   if (note.questions.length) {
-    card.append(h('details', { class: 'note-details' },
-      h('summary', {}, L.questions),
+    card.append(accordion('questions', L.questions, [
       h('ol', { class: 'note-questions' }, note.questions.map((q) => {
         const answer = h('div', { class: 'qa-answer', hidden: true }, h('strong', {}, `${L.answer}: `), q.answer);
         const toggle = h('button', { class: 'link-btn small', type: 'button', 'aria-expanded': 'false', onclick: () => {
@@ -164,10 +158,39 @@ export function renderNotes(root, s) {
           toggle.setAttribute('aria-expanded', String(!answer.hidden));
         } }, L.showAnswer);
         return h('li', {}, q.question, ' ', pageRef(q.page, hd.goToPage, L), h('div', {}, toggle), answer);
-      }))));
+      })),
+    ], { open: false, count: note.questions.length }));
   }
   card.append(h('p', { class: 'note-footnote' }, L.observation));
   root.append(card);
+}
+
+// Open/closed state of each accordion survives re-renders of the panel.
+const accordionState = new Map();
+let accordionSeq = 0;
+
+/**
+ * Accessible accordion with a smooth height transition (CSS grid rows 0fr → 1fr).
+ * Collapsed content is `inert`, so it cannot be focused or read out.
+ */
+function accordion(key, title, children, { open = false, count = null } = {}) {
+  const isOpen = accordionState.has(key) ? accordionState.get(key) : open;
+  const id = `acc-${key}-${++accordionSeq}`;
+  const panel = h('div', { class: 'acc-panel', id, role: 'region', 'aria-labelledby': `${id}-btn`, inert: isOpen ? null : true },
+    h('div', { class: 'acc-inner' }, ...children));
+  const btn = h('button', { class: 'acc-btn', id: `${id}-btn`, type: 'button', 'aria-expanded': String(isOpen), 'aria-controls': id },
+    h('span', { class: 'acc-title' }, title),
+    count != null ? h('span', { class: 'acc-count' }, String(count)) : null,
+    h('span', { class: 'acc-chevron', 'aria-hidden': 'true' }));
+  const wrap = h('section', { class: 'acc', dataset: { open: String(isOpen) } }, h('h3', { class: 'acc-head' }, btn), panel);
+  btn.addEventListener('click', () => {
+    const next = wrap.dataset.open !== 'true';
+    accordionState.set(key, next);
+    wrap.dataset.open = String(next);
+    btn.setAttribute('aria-expanded', String(next));
+    panel.inert = !next;
+  });
+  return wrap;
 }
 
 function noteTags(n) {

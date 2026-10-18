@@ -41,6 +41,38 @@ function openDb(name) {
   });
 }
 
+/** Database name used before the app was renamed to PiCODE. */
+export const LEGACY_DB_NAME = 'focusnote';
+
+/**
+ * One-time move of data from the pre-rename database into `target`.
+ * Rows whose key already exists in `target` are kept as they are. Returns the number of rows copied.
+ */
+async function migrateLegacy(target, legacyName) {
+  if (typeof indexedDB.databases !== 'function') return 0;
+  const existing = await indexedDB.databases();
+  if (!existing.some((d) => d.name === legacyName)) return 0;
+  const legacy = await openDb(legacyName);
+  let copied = 0;
+  try {
+    for (const store of Object.keys(STORES)) {
+      if (!legacy.objectStoreNames.contains(store)) continue;
+      const rows = await reqP(legacy.transaction(store, 'readonly').objectStore(store).getAll());
+      if (!rows.length) continue;
+      const keyPath = STORES[store].keyPath;
+      const have = new Set(await reqP(target.transaction(store, 'readonly').objectStore(store).getAllKeys()));
+      const tx = target.transaction(store, 'readwrite');
+      const os = tx.objectStore(store);
+      for (const row of rows) if (!have.has(row[keyPath])) { os.put(row); copied++; }
+      await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+    }
+  } finally {
+    legacy.close();
+  }
+  indexedDB.deleteDatabase(legacyName);   // not awaited: another open tab may block it until closed
+  return copied;
+}
+
 class MemoryBackend {
   constructor() { this.data = Object.fromEntries(Object.keys(STORES).map((s) => [s, new Map()])); }
   async get(store, key) { return structuredClone(this.data[store].get(key)); }
@@ -61,8 +93,10 @@ class IdbBackend {
 }
 
 export class Store {
-  constructor(name = 'focusnote') {
+  constructor(name = 'picode', { migrateFrom = name === 'picode' ? LEGACY_DB_NAME : null } = {}) {
     this.name = name;
+    this.migrateFrom = migrateFrom;
+    this.migratedRows = 0;
     this.backend = null;
     this.persistent = false;
     this.error = null;
@@ -70,8 +104,13 @@ export class Store {
 
   async open() {
     try {
-      this.backend = new IdbBackend(await openDb(this.name));
+      const db = await openDb(this.name);
+      this.backend = new IdbBackend(db);
       this.persistent = true;
+      if (this.migrateFrom) {
+        try { this.migratedRows = await migrateLegacy(db, this.migrateFrom); }
+        catch (e) { console.warn('Could not migrate data from the previous database', e); }
+      }
     } catch (e) {
       this.backend = new MemoryBackend();
       this.persistent = false;
@@ -114,7 +153,7 @@ export class Store {
   getAnalysis(docId) { return this.backend.get('analyses', docId); }
   saveAnalysis(docId, data, meta) { return this.backend.put('analyses', { docId, data, meta, updatedAt: new Date().toISOString() }); }
 
-  /** Removes everything FocusNote stored about one document. */
+  /** Removes everything PiCODE stored about one document. */
   async deleteDocumentData(docId) {
     for (const s of await this.backend.byIndex('sessions', 'docId', docId)) await this.backend.delete('sessions', s.id);
     for (const n of await this.backend.byIndex('notes', 'docId', docId)) await this.backend.delete('notes', n.id);
@@ -122,7 +161,7 @@ export class Store {
     await this.backend.delete('documents', docId);
   }
 
-  /** Removes all FocusNote data in this browser, including consent and settings. */
+  /** Removes all PiCODE data in this browser, including consent and settings. */
   async deleteAll() {
     for (const store of Object.keys(STORES)) await this.backend.clear(store);
   }

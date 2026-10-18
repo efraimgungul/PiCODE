@@ -1,5 +1,5 @@
 {
-  "$comment": "Single source of truth for FocusNote model output. Loaded by backend/prompts.py (sent to the model as a structured-output schema) and by js/schema-validator.js (validated again before rendering). The model returns ONE study note: highlighted bullet points first (selected text = CRITICAL_IMPORTANCE, re-read text = HIGH_RELEVANCE), then one continuous text whose depth follows the reader's attention.",
+  "$comment": "Single source of truth for PiCODE model output. Loaded by backend/prompts.py (sent to the model as a structured-output schema) and by js/schema-validator.js (validated again before rendering). The model returns ONE study note: highlighted bullet points first (selected text = CRITICAL_IMPORTANCE, re-read text = HIGH_RELEVANCE), then a summary with one sub-headed section per read page (short paragraphs + key points) whose depth follows the reader's attention.",
   "version": 3,
   "properties": {
     "studyNote": {

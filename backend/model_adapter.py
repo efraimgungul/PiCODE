@@ -1,6 +1,6 @@
 """Model runtime adapters.
 
-The rest of FocusNote only uses `status()` and `stream_chat()`, so switching
+The rest of PiCODE only uses `status()` and `stream_chat()`, so switching
 inference runtimes means adding an adapter here, not touching the UI.
 
 - OllamaAdapter: Ollama's native API (/api/tags, /api/show, /api/chat).
@@ -175,7 +175,7 @@ class OpenAICompatAdapter(BaseAdapter):
             "temperature": 0.2,
             "max_tokens": max_tokens,
             "response_format": {"type": "json_schema",
-                                "json_schema": {"name": "focusnote_analysis", "schema": schema}},
+                                "json_schema": {"name": "picode_analysis", "schema": schema}},
         }
         async with httpx.AsyncClient(timeout=self._timeout(), headers=self._headers()) as client:
             try:

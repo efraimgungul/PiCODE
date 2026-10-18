@@ -5,7 +5,7 @@ import { buildContext, rankPages, spreadPages, excerptFor, textInRange, attentio
 import { loadSchema, validate, taskSchema, validateAndGround, locateEvidence, normalizeForMatch, PSYCH_PATTERN } from '../js/schema-validator.js';
 import { Store, createNote, validateNote } from '../js/local-storage.js';
 import { toMarkdown, toJSON } from '../js/export.js';
-import { studyNoteToMarkdown } from '../js/note-format.js';
+import { studyNoteToMarkdown, shortParagraphs } from '../js/note-format.js';
 import { foldText, detectLanguage } from '../js/text-fold.js';
 import { paragraphAround } from '../js/pdf-reader.js';
 import { DEMO_ANALYSIS, demoAggregate, SAMPLE } from '../js/demo-data.js';
@@ -401,7 +401,7 @@ test('the demo note grounds fully against the real sample PDF', async () => {
 
 // ---------------------------------------------------------------- storage & export
 test('notes persist, update and delete in IndexedDB', async () => {
-  const name = `focusnote-test-${Date.now()}`;
+  const name = `picode-test-${Date.now()}`;
   const store = await new Store(name).open();
   ok(store.persistent, 'IndexedDB available');
   try {
@@ -427,13 +427,36 @@ test('notes persist, update and delete in IndexedDB', async () => {
   }
 });
 
+test('data from the pre-rename (FocusNote) database is moved once, then the old database is removed', async () => {
+  const stamp = Date.now();
+  const src = `focusnote-mig-${stamp}`, dst = `picode-mig-${stamp}`;
+  const old = await new Store(src, { migrateFrom: null }).open();
+  await old.saveNote(createNote({ docId: 'd', text: 'eski not', page: 1 }));
+  await old.setSetting('consent', 'granted');
+  old.close();
+  const s = await new Store(dst, { migrateFrom: src }).open();
+  try {
+    eq(s.migratedRows, 2);
+    eq((await s.listNotes('d'))[0].text, 'eski not');
+    eq(await s.getSetting('consent'), 'granted');
+    await new Promise((r) => setTimeout(r, 300));
+    ok(!(await indexedDB.databases()).some((d) => d.name === src), 'old database removed');
+  } finally {
+    s.close();
+  }
+  const again = await new Store(dst, { migrateFrom: src }).open();
+  eq(again.migratedRows, 0, 'nothing migrated twice');
+  again.close();
+  indexedDB.deleteDatabase(dst);
+});
+
 test('note validation', () => {
   eq(validateNote(createNote({ docId: 'd', text: 'x', page: 1 })), []);
   ok(validateNote({ id: 'a', docId: 'd', text: 'x', page: 0, source: 'ai' }).length === 1);
   ok(validateNote({ id: 'a', docId: 'd', text: 'x', source: 'robot' }).length === 1);
 });
 
-test('the note exports as one block: highlights first, then one continuous text', () => {
+test('the note exports as one block: highlights, then a sub-headed summary of short paragraphs', () => {
   const note = DEMO_ANALYSIS.studyNote;
   const md = studyNoteToMarkdown(note, { lang: 'tr', meta: { model: 'gemma4:12b' }, attention: new Map([[2, 610]]) });
   ok(md.startsWith(`# ${note.title}\n`));
@@ -441,11 +464,69 @@ test('the note exports as one block: highlights first, then one continuous text'
   ok(at('## Öne çıkanlar') > 0 && at('## Öne çıkanlar') < at('## Özet') && at('## Özet') < at('## Kaynaklar'), 'order');
   const bullets = md.slice(at('## Öne çıkanlar'), at('## Özet'));
   ok(bullets.indexOf('Çok önemli') < bullets.indexOf('Yüksek') && bullets.indexOf('Yüksek') < bullets.indexOf('**Önemli:**'), 'critical → high → key');
-  const body = md.slice(at('## Özet') + 7, at('## Kaynaklar'));
-  ok(!/^#/m.test(body), 'no headings inside the summary text');
-  ok(body.includes(note.overview.slice(0, 40)) && body.indexOf('_(s. 1)_') < body.indexOf('_(s. 5)_'), 'continuous, page order');
+  const summary = md.slice(at('## Özet'), at('## Kaynaklar'));
+  eq((summary.match(/^### /gm) ?? []).length, note.sections.length, 'one H3 sub-heading per section');
+  ok(summary.includes('### Geri çağırma pratiği ve test etkisi _(s. 2)_'));
+  ok(summary.indexOf('_(s. 1)_') < summary.indexOf('_(s. 5)_'), 'page order');
+  const prose = summary.split('\n').filter((l) => l && !/^(#|-|_|>)/.test(l));
+  ok(prose.every((l) => l.split(/\s+/).length <= 70), `paragraphs are short (longest ${Math.max(...prose.map((l) => l.split(/\s+/).length))} words)`);
   ok(md.includes('_Ayrıntılı, yaklaşık 10 dk 10 sn dikkat_'));
   eq((md.match(/^# /gm) ?? []).length, 1, 'single document');
+});
+
+test('long paragraphs are split into short ones at sentence boundaries', () => {
+  const text = 'Birinci cümle burada. İkinci cümle de var. Üçüncü cümle geliyor. Dördüncü cümle biter.\n\nYeni paragraf.';
+  eq(shortParagraphs(text), ['Birinci cümle burada. İkinci cümle de var.', 'Üçüncü cümle geliyor. Dördüncü cümle biter.', 'Yeni paragraf.']);
+  eq(shortParagraphs('Ebbinghaus 1885 yılında yayımladı. Sonra 2. bölüme geçti.', { maxSentences: 1 }), ['Ebbinghaus 1885 yılında yayımladı.', 'Sonra 2. bölüme geçti.']);
+  eq(shortParagraphs('Kısa.'), ['Kısa.']);
+  eq(shortParagraphs('Paragraf bir.\n\nkeyPoints: \n- sızan madde\n- ikinci madde'), ['Paragraf bir.'], 'leaked lists/labels removed');
+});
+
+test('AI notes: summary is an accordion that toggles smoothly and keeps its state', async () => {
+  const { renderNotes } = await import('../js/notes-panel.js');
+  const root = document.createElement('div');
+  document.body.append(root);
+  try {
+    const noop = () => {};
+    const props = { hasDoc: true, note: DEMO_ANALYSIS.studyNote, lastRun: { simulated: true }, dropped: [], stats: null, busy: false,
+      modelOk: true, isSample: true, lang: 'tr', attention: new Map(), pageStats: new Map(), excluded: [6],
+      handlers: { goToPage: noop, locate: noop, saveNote: noop, copyNote: noop, regenerate: noop, openSettings: noop, startDemo: noop } };
+    renderNotes(root, props);
+    const card = root.querySelector('.note-card');
+    ok(card, 'one note card');
+    const accs = [...card.querySelectorAll('.acc')];
+    eq(accs.map((a) => a.querySelector('.acc-title').textContent), ['Özet', 'Kaynaklar ve okuma notları', 'Kendini test et']);
+    const summary = accs[0];
+    const btn = summary.querySelector('.acc-btn');
+    const panel = summary.querySelector('.acc-panel');
+    eq([summary.dataset.open, btn.getAttribute('aria-expanded'), panel.inert], ['true', 'true', false], 'summary open by default');
+    const css = await (await fetch('../styles/main.css', { cache: 'no-store' })).text();
+    ok(/\.acc-panel\s*\{[^}]*transition:\s*grid-template-rows/.test(css), 'smooth height transition');
+    eq(summary.querySelectorAll('h4.sum-h').length, DEMO_ANALYSIS.studyNote.sections.length, 'H4 sub-heading per section');
+    ok(summary.querySelectorAll('.sum-points li').length > 0, 'key points as bullets');
+    eq(accs[1].querySelector('.acc-panel').inert, true, 'sources collapsed and inert');
+    btn.click();
+    eq([summary.dataset.open, btn.getAttribute('aria-expanded'), panel.inert], ['false', 'false', true], 'collapsed');
+    renderNotes(root, props);
+    eq(root.querySelector('.acc').dataset.open, 'false', 'state kept across re-render');
+    root.querySelector('.acc-btn').click();
+    eq(root.querySelector('.acc').dataset.open, 'true');
+    ok(card.querySelector('.hl-list') && card.querySelector('.hl-list').compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING, 'highlights come before the summary');
+  } finally {
+    root.remove();
+  }
+});
+
+test('branding: PiCODE everywhere, no model-status pill in the header', async () => {
+  const html = await (await fetch('../', { cache: 'no-store' })).text();
+  ok(!/FocusNote/i.test(html), 'no FocusNote left in the page');
+  ok(html.includes('<title>PiCODE</title>'));
+  ok(html.includes('class="wordmark"'), 'PiCODE wordmark in the header');
+  ok(!html.includes('model-pill'), 'model status pill removed');
+  for (const f of ['../js/app.js', '../js/notes-panel.js', '../js/local-storage.js', '../js/export.js']) {
+    const src = await (await fetch(f, { cache: 'no-store' })).text();
+    ok(!/FocusNote/.test(src.replace(/moved from FocusNote|LEGACY_DB_NAME = 'focusnote'|before the app was renamed/g, '')), `${f} renamed`);
+  }
 });
 
 test('Markdown and JSON exports contain notes with provenance', () => {
@@ -459,7 +540,7 @@ test('Markdown and JSON exports contain notes with provenance', () => {
   ok(md.includes('_(your note)_') && md.includes('AI (gemma4:12b), edited by you'));
   ok(!md.includes('# saved copy'), 'saved copy of the current note is not duplicated');
   const js = JSON.parse(toJSON({ title: 'Doc', docId: 'd', notes }));
-  eq([js.format, js.notes.length], ['focusnote-export', 3]);
+  eq([js.format, js.notes.length], ['picode-export', 3]);
 });
 
 // ---------------------------------------------------------------- run

@@ -1,4 +1,4 @@
-// FocusNote application shell: wires the reader, tracker, storage, model
+// PiCODE application shell: wires the reader, tracker, storage, model
 // client and panels together. Feature logic lives in the imported modules.
 
 import { PdfReader } from './pdf-reader.js';
@@ -26,7 +26,7 @@ const els = {
   zoomIn: $('btn-zoom-in'), zoomOut: $('btn-zoom-out'), zoomLabel: $('zoom-label'),
   searchForm: $('search-form'), searchInput: $('search-input'), searchCount: $('search-count'),
   searchPrev: $('btn-search-prev'), searchNext: $('btn-search-next'),
-  trackingPill: $('tracking-pill'), modelPill: $('model-pill'), panel: $('panel'), scrim: $('scrim'),
+  trackingPill: $('tracking-pill'), modelDot: $('model-dot'), panel: $('panel'), scrim: $('scrim'),
   notesBody: $('notes-body'), savedBody: $('saved-body'), sessionBody: $('session-body'), savedCount: $('saved-count'),
   analyze: $('btn-analyze'), includeNotes: $('opt-include-notes'), progress: $('analysis-progress'),
   progressText: $('progress-text'), progressTime: $('progress-time'), cancel: $('btn-cancel'),
@@ -147,8 +147,11 @@ function renderModelPill() {
   else if (s && s.ok && s.isGemma4 === false) { st = 'warn'; label = `Not Gemma 4 · ${s.model}`; }
   else if (s && s.ok) { st = 'warn'; label = `${s.model} (Gemma 4 unverified)`; }
   else if (s) { st = 'offline'; label = s.reachable ? 'Model not installed' : 'Model offline'; }
-  els.modelPill.dataset.state = st;
-  els.modelPill.querySelector('.label').textContent = label;
+  // Shown as a small dot on the sidebar "Model" button (the header shows the PiCODE wordmark).
+  els.modelDot.dataset.state = st;
+  const btn = $('btn-settings');
+  btn.title = `Model settings — ${label}`;
+  btn.setAttribute('aria-label', `Model settings. Status: ${label}`);
 }
 
 /** Attention per page (seconds-equivalent) for the active session; drives note depth. */
@@ -664,7 +667,7 @@ els.preview.addEventListener('toggle', async () => {
   if (state.demo) { els.previewBody.textContent = 'Demo mode: nothing is sent to a model. The simulated study note is pre-written.'; return; }
   const ctx = await buildCurrentContext('note');
   const where = state.status ? `${state.status.model} at ${state.status.baseUrl}` : 'the configured model';
-  els.previewBody.textContent = `// Sent to the FocusNote backend, which forwards it to ${where}.\n${JSON.stringify(ctx, null, 2)}`;
+  els.previewBody.textContent = `// Sent to the PiCODE backend, which forwards it to ${where}.\n${JSON.stringify(ctx, null, 2)}`;
 });
 
 function setAnalysis(target, checked, meta) {
@@ -746,6 +749,7 @@ async function runAnalysis() {
         }
         else if (evt.type === 'progress') setProgress(`Writing the study note… ${evt.chunks} tokens received`);
         else if (evt.type === 'status' && evt.phase === 'repairing') setProgress('The output was not valid JSON — asking the model to repair it (one retry)…');
+        else if (evt.type === 'status' && evt.phase === 'expanding') setProgress(`Expanding the sections you focused on (p. ${evt.pages.join(', ')}) — they came back too short…`);
       },
     });
     setProgress('Validating against the schema and the PDF text…');
@@ -831,7 +835,7 @@ function openPrivacy() {
   const btn = (label, fn, cls = 'btn small') => h('button', { class: cls, type: 'button', onclick: fn }, label);
   body.replaceChildren(h('div', { class: 'privacy-grid' },
     h('section', {},
-      h('h3', {}, 'What FocusNote records (only with your permission)'),
+      h('h3', {}, 'What PiCODE records (only with your permission)'),
       h('ul', {},
         h('li', {}, 'Text you select in the PDF (click and drag), with its page and paragraph — tagged CRITICAL_IMPORTANCE.'),
         h('li', {}, 'Scroll position, speed and direction — to ignore fast scrolling and to detect re-reading (scrolling back up over lines), tagged HIGH_RELEVANCE.'),
@@ -845,12 +849,12 @@ function openPrivacy() {
     h('section', {},
       h('h3', {}, 'Where it is stored'),
       h('p', {}, state.store?.persistent
-        ? 'In this browser only (IndexedDB database “focusnote”). PDFs themselves are not stored; they are read from your disk each time.'
+        ? 'In this browser only (IndexedDB database “picode”). PDFs themselves are not stored; they are read from your disk each time.'
         : 'Browser storage is unavailable, so data is kept in memory and lost when the page closes.')),
     h('section', {},
       h('h3', {}, 'What is sent, and where'),
       h('p', {}, 'Only when you click Create study note or Regenerate: up to 8 PDF text excerpts (at most 12,000 characters; longer for pages you spent more time on), your selected passages with their paragraphs, re-read passages, per-page visit statistics, and — only if you tick the box — your saved notes.'),
-      h('p', {}, 'They go to the FocusNote backend on this computer, which forwards them to ', h('strong', {}, endpoint), local ? ' (this computer).' : ' — a REMOTE endpoint; you are asked before every request.'),
+      h('p', {}, 'They go to the PiCODE backend on this computer, which forwards them to ', h('strong', {}, endpoint), local ? ' (this computer).' : ' — a REMOTE endpoint; you are asked before every request.'),
       h('p', { class: 'small muted' }, 'No analytics, no third-party services, no CDN. Use “Preview what will be sent” in the AI notes tab to see the exact data.')),
     h('section', {},
       h('h3', {}, 'Your controls'),
@@ -860,7 +864,7 @@ function openPrivacy() {
         btn('Export notes (JSON)', () => $('btn-export-json').click())),
       h('div', { class: 'row' },
         state.doc ? btn('Delete this document’s data', deleteDocumentData, 'btn small danger') : null,
-        btn('Delete all FocusNote data', deleteAllData, 'btn small danger'))),
+        btn('Delete all PiCODE data', deleteAllData, 'btn small danger'))),
   ));
   for (const b of body.querySelectorAll('.row .btn')) if (!state.doc && /session|Export/.test(b.textContent)) b.disabled = true;
   openDialog('dlg-privacy');
@@ -883,10 +887,10 @@ async function deleteDocumentData() {
 }
 
 async function deleteAllData() {
-  if (!confirm('Delete ALL FocusNote data in this browser (notes, analyses, sessions, settings and consent)? This cannot be undone.')) return;
+  if (!confirm('Delete ALL PiCODE data in this browser (notes, analyses, sessions, settings and consent)? This cannot be undone.')) return;
   try {
     await state.store.deleteAll();
-    try { localStorage.removeItem('fn-theme'); } catch { /* ignore */ }
+    try { localStorage.removeItem('picode-theme'); } catch { /* ignore */ }
     state.real = { analysis: null, notes: [] };
     state.previousSessions = null;
     state.consent = null;
@@ -898,7 +902,7 @@ async function deleteAllData() {
     }
     $('dlg-privacy').close();
     renderAll();
-    toast('All FocusNote data deleted.');
+    toast('All PiCODE data deleted.');
   } catch (e) { toast(`Delete failed: ${e.message}`, 'error'); }
 }
 
@@ -938,7 +942,6 @@ for (const t of tabNames) {
 $('btn-panel').addEventListener('click', () => setPanelOpen(!els.panel.classList.contains('open')));
 $('btn-panel-close').addEventListener('click', () => setPanelOpen(false));
 els.scrim.addEventListener('click', () => setPanelOpen(false));
-els.modelPill.addEventListener('click', () => (state.demo ? toast('Demo mode: no model is used.') : openSettings()));
 
 $('btn-theme').addEventListener('click', () => {
   const dark = document.documentElement.dataset.theme
@@ -946,7 +949,7 @@ $('btn-theme').addEventListener('click', () => {
     : window.matchMedia('(prefers-color-scheme: dark)').matches;
   const next = dark ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
-  try { localStorage.setItem('fn-theme', next); } catch { /* preference not kept */ }
+  try { localStorage.setItem('picode-theme', next); } catch { /* preference not kept */ }
 });
 $('btn-help').addEventListener('click', () => openDialog('dlg-help'));
 $('btn-privacy').addEventListener('click', openPrivacy);
@@ -974,6 +977,7 @@ window.addEventListener('drop', (e) => {
 
 async function init() {
   state.store = await new Store().open();
+  if (state.store.migratedRows) toast(`Your notes and sessions were moved from FocusNote to PiCODE (${state.store.migratedRows} records).`);
   if (!state.store.persistent) {
     setBanner('storage', { kind: 'warn', text: 'Browser storage (IndexedDB) is unavailable — notes and sessions will only last until this page is closed.' });
   }
@@ -987,8 +991,8 @@ async function init() {
 
 init().catch((e) => {
   console.error(e);
-  toast(`FocusNote failed to start: ${e.message}`, 'error');
+  toast(`PiCODE failed to start: ${e.message}`, 'error');
 });
 
 // Debug handle for the browser console (same page only; nothing is sent anywhere).
-window.focusnote = { reader, tracker, state };
+window.picode = { reader, tracker, state };

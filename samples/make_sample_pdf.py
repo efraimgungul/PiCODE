@@ -1,7 +1,7 @@
 """Generate samples/kalici-ogrenme.pdf without any third-party dependency.
 
 The document ("Kalıcı Öğrenme") is an original short study guide in Turkish,
-written for FocusNote and released under CC0 together with this script. It is
+written for PiCODE and released under CC0 together with this script. It is
 a real, multi-page, text-based PDF so that PDF.js can render it, extract its
 text, and the demo analysis can cite exact passages from real pages.
 
@@ -28,7 +28,7 @@ PAGES = [
     [
         ("h1", TITLE),
         ("sub", SUBTITLE),
-        ("note", "FocusNote örnek belgesi - CC0 - tanıtım ve çalışma amacıyla yazılmıştır."),
+        ("note", "PiCODE örnek belgesi - CC0 - tanıtım ve çalışma amacıyla yazılmıştır."),
         ("h2", "Giriş"),
         ("p", "Öğrencilerin çoğu çalışma zamanını notlarını yeniden okuyarak ve ders kitaplarının "
               "altını çizerek geçirir. Bu alışkanlıklar verimli hissettirir, çünkü konu tanıdık "
@@ -275,7 +275,7 @@ def build_pdf() -> bytes:
     fonts = [add(f"<< /Type /Font /Subtype /Type1 /BaseFont /{name} /Encoding {enc} 0 R >>".encode())
              for name in ("Helvetica", "Helvetica-Bold", "Helvetica-Oblique")]
     info = add(b"<< /Title " + utf16_text(f"{TITLE} - {SUBTITLE}") +
-               b" /Author (FocusNote contributors) /Subject " + utf16_text("Örnek belge, CC0") +
+               b" /Author (PiCODE contributors) /Subject " + utf16_text("Örnek belge, CC0") +
                b" /Lang (tr-TR) >>")
 
     page_ids = []

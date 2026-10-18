@@ -1,6 +1,6 @@
-# Contributing to FocusNote
+# Contributing to PiCODE
 
-Thanks for helping! FocusNote is intentionally small: vanilla HTML/CSS/JS in the browser, a minimal FastAPI backend, no build step.
+Thanks for helping! PiCODE is intentionally small: vanilla HTML/CSS/JS in the browser, a minimal FastAPI backend, no build step.
 
 ## Setup
 

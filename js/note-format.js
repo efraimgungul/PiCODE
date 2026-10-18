@@ -4,7 +4,8 @@
 // Note layout (one block):
 //   title
 //   highlights  — bullets, CRITICAL_IMPORTANCE (selected) → HIGH_RELEVANCE (re-read) → KEY_POINT
-//   summary     — overview + every section as ONE continuous text, page link after each part
+//   summary     — collapsible: short overview, then one H4 sub-heading per section with short
+//                 paragraphs (≤ 2 sentences) and key-point bullets
 //   sources, review list, questions — below, collapsed in the UI
 
 export const LABELS = {
@@ -17,7 +18,7 @@ export const LABELS = {
     importanceShort: { CRITICAL_IMPORTANCE: 'Critical', HIGH_RELEVANCE: 'High', KEY_POINT: 'Key' },
     attention: (t) => `about ${t} of attention`,
     signal: { selection: 'you selected text', reread: 'you re-read', revisit: 'you returned', dwell: 'reading time', none: '' },
-    sourcesTitle: 'Sources, key points and reading notes',
+    sourcesTitle: 'Sources and reading notes',
     excluded: (pages) => `Pages that were not read were left out: p. ${pages}`,
     rereadTimes: (n) => `re-read ${n}×`,
     selectedTimes: (n) => `${n} selection${n > 1 ? 's' : ''}`,
@@ -38,7 +39,7 @@ export const LABELS = {
     importanceShort: { CRITICAL_IMPORTANCE: 'Çok önemli', HIGH_RELEVANCE: 'Yüksek', KEY_POINT: 'Önemli' },
     attention: (t) => `yaklaşık ${t} dikkat`,
     signal: { selection: 'metin seçtiniz', reread: 'yeniden okudunuz', revisit: 'geri döndünüz', dwell: 'okuma süresi', none: '' },
-    sourcesTitle: 'Kaynaklar, önemli noktalar ve okuma notları',
+    sourcesTitle: 'Kaynaklar ve okuma notları',
     excluded: (pages) => `Okunmayan sayfalar nota alınmadı: s. ${pages}`,
     rereadTimes: (n) => `${n} kez yeniden okundu`,
     selectedTimes: (n) => `${n} seçim`,
@@ -54,8 +55,41 @@ export const LABELS = {
 
 export const labelsFor = (lang) => LABELS[lang] ?? LABELS.en;
 
+// Prose only: list lines and stray labels (e.g. "keyPoints:") that a model may append are dropped.
+const LIST_LINE = /^\s*(?:[-•*·]|\d+[.)])\s+/;
+const LABEL_LINE = /^\s*(?:key\s*points?|keypoints|önemli noktalar|anahtar noktalar|notes?)\s*:?\s*$/iu;
+export const cleanProse = (text) => String(text ?? '').split('\n').filter((l) => !LIST_LINE.test(l) && !LABEL_LINE.test(l)).join('\n');
+
 /** Paragraphs of a text block (blank-line separated). */
-export const paragraphsOf = (text) => String(text ?? '').split(/\n\s*\n/).map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+export const paragraphsOf = (text) => cleanProse(text).split(/\n\s*\n/).map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+
+// Sentence end followed by a capital letter or digit (Turkish capitals included).
+const SENTENCE_BREAK = /(?<=[.!?…])\s+(?=["“'(]?[A-ZÇĞİÖŞÜÂÎÛ0-9])/u;
+
+/**
+ * Short, scannable paragraphs: each paragraph is split at sentence boundaries into
+ * chunks of at most `maxSentences` sentences / roughly `maxWords` words.
+ */
+export function shortParagraphs(text, { maxSentences = 2, maxWords = 45 } = {}) {
+  const out = [];
+  for (const para of paragraphsOf(text)) {
+    const sentences = para.split(SENTENCE_BREAK);
+    let cur = [];
+    let words = 0;
+    for (const s of sentences) {
+      const w = s.split(/\s+/).length;
+      if (cur.length && (cur.length >= maxSentences || words + w > maxWords)) {
+        out.push(cur.join(' '));
+        cur = [];
+        words = 0;
+      }
+      cur.push(s);
+      words += w;
+    }
+    if (cur.length) out.push(cur.join(' '));
+  }
+  return out;
+}
 
 const MARK = { CRITICAL_IMPORTANCE: '🔴', HIGH_RELEVANCE: '🔵', KEY_POINT: '⚪' };
 
@@ -71,20 +105,23 @@ export function studyNoteToMarkdown(note, { lang = 'en', meta = null, attention 
     }
     out.push('');
   }
+  // Summary: short overview, then one sub-headed part per section with short paragraphs and bullets.
   out.push(`## ${L.summary}`, '');
-  out.push(...paragraphsOf(note.overview).flatMap((p) => [p, '']));
-  for (const s of note.sections) {
-    const paras = paragraphsOf(s.content);
-    paras.forEach((p, i) => out.push(i === paras.length - 1 ? `${p} _(${L.page} ${s.page})_` : p, ''));
-  }
-  out.push(`## ${L.sourcesTitle}`, '');
+  out.push(...shortParagraphs(note.overview, { maxSentences: 3, maxWords: 60 }).flatMap((p) => [p, '']));
   for (const s of note.sections) {
     const secs = Math.round(attention.get(s.page) ?? 0);
     const tags = [L.depth[s.depth], secs >= 10 ? L.attention(L.duration(secs)) : null].filter(Boolean).join(', ');
-    out.push(`### ${s.heading} (${L.page} ${s.page})`, '', `_${tags}_`, '');
+    out.push(`### ${s.heading} _(${L.page} ${s.page})_`, '', `_${tags}_`, '');
+    out.push(...shortParagraphs(s.content).flatMap((p) => [p, '']));
     if (s.keyPoints.length) { for (const k of s.keyPoints) out.push(`- ${k}`); out.push(''); }
-    if (s.grounding !== 'unverified' && s.evidence) out.push(`> ${s.evidence} (${L.page} ${s.page})`, '');
-    if (s.readerNote) out.push(`**${L.readerNote}:** ${s.readerNote}`, '');
+  }
+  const sources = note.sections.filter((s) => (s.grounding !== 'unverified' && s.evidence) || s.readerNote);
+  if (sources.length) {
+    out.push(`## ${L.sourcesTitle}`, '');
+    for (const s of sources) {
+      if (s.grounding !== 'unverified' && s.evidence) out.push(`> ${s.evidence} _(${L.page} ${s.page})_`, '');
+      if (s.readerNote) out.push(`**${L.readerNote} (${L.page} ${s.page}):** ${s.readerNote}`, '');
+    }
   }
   if (note.reviewLater.length) {
     out.push(`## ${L.review}`, '');

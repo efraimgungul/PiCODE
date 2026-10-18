@@ -3,12 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FocusNote</title>
-  <meta name="description" content="FocusNote — a local-first PDF reading companion that turns your reading into study notes with Gemma 4.">
+  <title>PiCODE</title>
+  <meta name="description" content="PiCODE — a local-first PDF reading companion that turns your reading into study notes with Gemma 4.">
+  <meta name="application-name" content="PiCODE">
+  <meta name="apple-mobile-web-app-title" content="PiCODE">
+  <meta name="theme-color" content="#f4f3ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16181c" media="(prefers-color-scheme: dark)">
   <!-- Everything is served locally: no CDN, no analytics, no external fonts. -->
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b5bdb'/%3E%3Cpath d='M10 9h12v3H13.5v3H20v3h-6.5v5H10z' fill='white'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235466c0'/%3E%3Cpath d='M7 9.5h18v3H7z M11 12.5h3v11h-3z M18 12.5h3v8c0 .9.4 1.3 1.2 1.3H24v2.7h-2.2c-2.5 0-3.8-1.3-3.8-3.9z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="vendor/pdfjs/text-layer.css">
   <link rel="stylesheet" href="styles/main.css">
   <script src="js/theme-init.js"></script>
@@ -43,7 +47,7 @@
   <div class="app" id="app">
     <!-- Left: compact navigation -->
     <nav class="sidebar" aria-label="Main">
-      <div class="brand" title="FocusNote"><span aria-hidden="true">F</span><span class="sr-only">FocusNote</span></div>
+      <div class="brand" title="PiCODE"><span aria-hidden="true">π</span><span class="sr-only">PiCODE</span></div>
       <button class="nav-btn" id="btn-open" type="button" title="Open a PDF from your computer">
         <svg class="icon"><use href="#i-open"/></svg><span>Open</span>
       </button>
@@ -59,7 +63,7 @@
         <svg class="icon"><use href="#i-shield"/></svg><span>Privacy</span>
       </button>
       <button class="nav-btn" id="btn-settings" type="button" title="Model settings">
-        <svg class="icon"><use href="#i-cpu"/></svg><span>Model</span>
+        <span class="nav-icon"><svg class="icon"><use href="#i-cpu"/></svg><span class="nav-dot" id="model-dot" data-state="checking" aria-hidden="true"></span></span><span>Model</span>
       </button>
       <button class="nav-btn" id="btn-theme" type="button" title="Toggle light/dark theme">
         <svg class="icon"><use href="#i-sun"/></svg><span>Theme</span>
@@ -109,7 +113,7 @@
         <div class="empty-state" id="empty-state">
           <div class="empty-card">
             <h1>Read a PDF. Get study notes from how you read.</h1>
-            <p>FocusNote renders your PDF locally, notices a few explicit reading signals (selections, revisits, time on page) with your consent, and asks a local Gemma 4 model to turn them into grounded notes with page references.</p>
+            <p>PiCODE renders your PDF locally and, with your consent, notices what you select and what you scroll back to re-read. A local Gemma 4 model turns that into one short, grounded study note with page references.</p>
             <div class="empty-actions">
               <button class="btn primary" type="button" data-action="open">Open a PDF</button>
               <button class="btn" type="button" data-action="sample">Try the sample document</button>
@@ -125,9 +129,7 @@
     <!-- Right: AI notes and reading insights -->
     <aside class="panel" id="panel" aria-label="Notes and insights">
       <div class="panel-head">
-        <button class="model-pill" id="model-pill" type="button" data-state="checking" title="Model status — click for settings">
-          <span class="dot" aria-hidden="true"></span><span class="label">Checking model…</span>
-        </button>
+        <div class="wordmark" role="img" aria-label="PiCODE"><span class="wm-pi" aria-hidden="true">Pi</span><span class="wm-code" aria-hidden="true">CODE</span></div>
         <button class="icon-btn small panel-close" id="btn-panel-close" type="button" aria-label="Close panel"><svg class="icon"><use href="#i-x"/></svg></button>
       </div>
       <div class="tabs" role="tablist" aria-label="Panel sections">
@@ -181,7 +183,7 @@
   <dialog id="dlg-consent" aria-labelledby="consent-title">
     <form method="dialog" class="dialog">
       <h2 id="consent-title">Before you start reading</h2>
-      <p>FocusNote can use a few reading signals to personalise your notes. With your permission it records, <strong>only inside the PDF viewer</strong>:</p>
+      <p>PiCODE can use a few reading signals to personalise your notes. With your permission it records, <strong>only inside the PDF viewer</strong>:</p>
       <ul class="tick-list">
         <li>Text you select with the mouse (click and drag), with its page and paragraph — treated as most important.</li>
         <li>Scrolling speed and direction, to ignore fast scrolling and to recognise re-reading — scrolling back up over lines you just read.</li>
@@ -209,13 +211,13 @@
   <dialog id="dlg-settings" aria-labelledby="settings-title">
     <form class="dialog" id="settings-form">
       <div class="dialog-head"><h2 id="settings-title">Model settings</h2><button class="icon-btn small" data-close type="button" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button></div>
-      <p class="muted small">FocusNote's backend forwards analysis requests to this runtime. Gemma 4 is the intended model; whatever model you configure is shown by its real name on every result.</p>
+      <p class="muted small">PiCODE's backend forwards analysis requests to this runtime. Gemma 4 is the intended model; whatever model you configure is shown by its real name on every result.</p>
       <label class="field"><span>Runtime</span>
         <select id="cfg-runtime"><option value="ollama">Ollama (native API)</option><option value="openai">OpenAI-compatible server (llama.cpp, LM Studio, vLLM)</option></select>
       </label>
       <label class="field"><span>Base URL</span><input id="cfg-base" type="url" required placeholder="http://127.0.0.1:11434"></label>
       <label class="field"><span>Model identifier</span><input id="cfg-model" type="text" required placeholder="gemma4:12b" list="cfg-models"><datalist id="cfg-models"></datalist></label>
-      <div class="remote-warning" id="cfg-remote-warning" hidden>This endpoint is not on this computer. PDF excerpts and reading signals would leave your device; FocusNote will ask for confirmation before every analysis.</div>
+      <div class="remote-warning" id="cfg-remote-warning" hidden>This endpoint is not on this computer. PDF excerpts and reading signals would leave your device; PiCODE will ask for confirmation before every analysis.</div>
       <div class="status-box" id="cfg-status" aria-live="polite"></div>
       <div class="dialog-actions">
         <button class="btn" id="btn-test" type="button">Test connection</button>
@@ -237,11 +239,11 @@
         <li>Save the note and export it as Markdown or JSON.</li>
       </ol>
       <h3>Running Gemma 4 locally</h3>
-      <p>FocusNote was verified with <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a> and the <code>gemma4:12b</code> model. In a terminal:</p>
+      <p>PiCODE was verified with <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">Ollama</a> and the <code>gemma4:12b</code> model. In a terminal:</p>
       <pre>ollama pull gemma4:12b
 ollama serve</pre>
       <p>Then open <em>Model settings</em>, keep <code>http://127.0.0.1:11434</code> and <code>gemma4:12b</code>, and click <em>Test connection</em>. Run <code>ollama list</code> to see which tags you have. The 12B model needs roughly 8&nbsp;GB of memory; the first analysis loads the model and can take one to two minutes.</p>
-      <p>Any OpenAI-compatible local server works too (choose that runtime in settings). Such servers do not report a model family, so FocusNote can only check the model name.</p>
+      <p>Any OpenAI-compatible local server works too (choose that runtime in settings). Such servers do not report a model family, so PiCODE can only check the model name.</p>
       <h3>Keyboard</h3>
       <ul><li><kbd>←</kbd>/<kbd>→</kbd> or <kbd>PgUp</kbd>/<kbd>PgDn</kbd> in the viewer: previous / next page</li><li><kbd>/</kbd>: search &nbsp; <kbd>Esc</kbd>: clear search, close panels</li><li><kbd>+</kbd>/<kbd>-</kbd> in the viewer: zoom</li></ul>
     </div>

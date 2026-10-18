@@ -36,7 +36,7 @@ export function renderSession(root, s) {
       s.hasDoc ? h('button', { class: 'btn small', type: 'button', onclick: hd.clearSession }, 'Clear session') : null,
       h('button', { class: 'link-btn small', type: 'button', onclick: hd.openPrivacy }, 'What is collected?'),
     ));
-    if (s.state === 'off') root.append(h('div', { class: 'callout' }, 'Without reading signals FocusNote can still summarize the document, but selections and re-reads cannot shape the note.'));
+    if (s.state === 'off') root.append(h('div', { class: 'callout' }, 'Without reading signals PiCODE can still summarize the document, but selections and re-reads cannot shape the note.'));
     if (!s.persistent) root.append(h('div', { class: 'callout warn' }, 'Browser storage is unavailable, so this session and your notes will be lost when the page closes.'));
   }
   if (!s.hasDoc) { root.append(h('div', { class: 'empty-panel' }, h('strong', {}, 'No document open'))); return; }

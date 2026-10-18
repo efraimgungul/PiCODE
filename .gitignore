@@ -6,7 +6,7 @@ __pycache__/
 .pytest_cache/
 
 # Local backend settings saved from the Model dialog
-backend/focusnote.config.json
+backend/picode.config.json
 
 # Secrets
 .env

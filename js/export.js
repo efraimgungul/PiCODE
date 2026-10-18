@@ -31,7 +31,7 @@ export function toMarkdown({ title, notes, analysis = null, analysisMeta = null,
 
 export function toJSON({ title, docId, notes, analysis = null, analysisMeta = null, exportedAt = new Date() }) {
   return JSON.stringify({
-    format: 'focusnote-export', version: 1, exportedAt: exportedAt.toISOString(),
+    format: 'picode-export', version: 1, exportedAt: exportedAt.toISOString(),
     document: { title, docId },
     notes: notes.map(({ id, page, text, quote, source, edited, origin, createdAt, updatedAt }) =>
       ({ id, page, text, quote, source, edited, origin, createdAt, updatedAt })),
@@ -48,4 +48,4 @@ export function download(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export const safeFilename = (s) => (s || 'focusnote').replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'focusnote';
+export const safeFilename = (s) => (s || 'picode').replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'picode';

@@ -93,7 +93,7 @@ export class PdfReader extends EventTarget {
     try {
       doc = await this.loadingTask.promise;
     } catch (e) {
-      if (e?.name === 'PasswordException') throw new PdfReaderError('password', 'This PDF is password-protected. FocusNote does not open protected PDFs.');
+      if (e?.name === 'PasswordException') throw new PdfReaderError('password', 'This PDF is password-protected. PiCODE does not open protected PDFs.');
       if (e?.name === 'InvalidPDFException') throw new PdfReaderError('invalid', 'This file is not a valid PDF or is corrupted.');
       throw new PdfReaderError('load_failed', `The PDF could not be opened (${e?.message || 'unknown error'}).`);
     }
@@ -378,7 +378,7 @@ export class PdfReader extends EventTarget {
 
   clearHighlight() {
     this.highlight = null;
-    for (const s of this.pagesEl.querySelectorAll('.fn-hl')) s.classList.remove('fn-hl', 'fn-active');
+    for (const s of this.pagesEl.querySelectorAll('.pc-hl')) s.classList.remove('pc-hl', 'pc-active');
   }
 
   _applyHighlight() {
@@ -412,8 +412,8 @@ export class PdfReader extends EventTarget {
     while (at !== -1) {
       const nodes = new Set(owner.slice(at, at + needle.length).filter(Boolean));
       for (const n of nodes) {
-        n.classList.add('fn-hl');
-        if (occurrence === h.active) { n.classList.add('fn-active'); first ??= n; }
+        n.classList.add('pc-hl');
+        if (occurrence === h.active) { n.classList.add('pc-active'); first ??= n; }
       }
       occurrence++;
       at = str.indexOf(needle, at + needle.length);

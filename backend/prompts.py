@@ -1,4 +1,4 @@
-"""Prompt construction and output-schema handling for FocusNote.
+"""Prompt construction and output-schema handling for PiCODE.
 
 The output schema lives in schema/analysis.schema.json and is shared with the
 frontend validator. This module turns it into per-task JSON schemas, renders the
@@ -10,6 +10,7 @@ evidence against the real PDF text).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "analysis.schema.json"
@@ -78,10 +79,10 @@ def normalize(value, schema: dict):
 
 LANGUAGE_NAMES = {"tr": "Turkish (Türkçe)", "en": "English"}
 
-SYSTEM_PROMPT = """You are FocusNote, a study-notes assistant. You receive excerpts of the PDF \
+SYSTEM_PROMPT = """You are PiCODE, a study-notes assistant. You receive excerpts of the PDF \
 pages the reader actually read, and a summary of how they read them. Write ONE study note as JSON. \
-The app shows it as a single block: the highlight bullets first, then "overview" and every \
-section's "content" joined into ONE continuous text in page order — not a list of fragments.
+The app shows it as a single, scannable block: the highlight bullets first, then a summary made \
+of the "overview" and one short sub-headed part per section, in page order.
 
 Importance tags (strongest first):
 - CRITICAL_IMPORTANCE: text the reader selected with the mouse. Highest weight. Every critical \
@@ -97,23 +98,25 @@ Structure:
 - "highlights": 3-8 bullet points, most important first: all CRITICAL_IMPORTANCE passages, then \
 HIGH_RELEVANCE passages, then the most important other ideas as "KEY_POINT". Each "text" is one \
 clear sentence stating the idea (not a quote); "evidence" is the supporting quote.
-- "overview": the opening paragraph (60-110 words): what the read part of the document is about \
-and how its ideas connect.
-- "sections": exactly one section per excerpt, in page order. "content" is plain prose: no \
-headings, no bullet lists, no page labels inside it. Start each section's content with a natural \
-transition from the previous one, so the joined text flows. "heading" is a short label used only \
-in the source list.
+- "overview": 2-3 sentences (at most 60 words): what the read part of the document is about and \
+how its ideas connect.
+- "sections": exactly one section per excerpt, in page order. "heading" is a clear sub-heading of \
+2-6 words that names the topic (it is shown as a sub-heading). "content" is made of paragraphs \
+of at most 2-3 sentences each, separated by a blank line; plain text — no markdown, no bullet \
+lists, no page labels. Each paragraph stays short; the DEPTH decides HOW MANY paragraphs a \
+section gets, so deep sections are long in total. Put the important facts in "keyPoints" \
+(short phrases, shown as bullets under the paragraphs).
 - "reviewLater": pages worth another look, each tied to an observed signal; "reason" is a short \
 full sentence in the note's language (e.g. what was re-read and what to practise), never just a label.
 - "questions": 3-4 self-test questions with short answers.
 
 Depth — follow the DEPTH given for each excerpt; it is computed from the signals above:
-- deep: the most important part of the note. Write a thorough explanation of AT LEAST 160 words \
-in 2-3 paragraphs separated by a blank line: start with the CRITICAL / HIGH passages of that page, \
-define every concept, explain why and how it works, give the studies, numbers and examples from \
-the text, and connect it to other sections. 4-6 keyPoints.
-- standard: a clear explanation of the main idea (50-90 words). 2-3 keyPoints.
-- brief: one or two sentences (15-35 words). 0-1 keyPoints.
+- deep: the most important part of the note — never shorter than a standard section. 3-4 \
+paragraphs, 120-180 words in total: start with the CRITICAL / HIGH passages of that page, \
+define the concepts, explain why and how, give the studies, numbers and examples from the text. \
+4-6 keyPoints.
+- standard: the main idea in 40-70 words as 1-2 short paragraphs. 2-3 keyPoints.
+- brief: one sentence (10-25 words). 0-1 keyPoints.
 
 Grounding rules:
 1. Use only facts from the excerpts. Do not add outside knowledge.
@@ -131,9 +134,9 @@ readerNote is "" and signal is "none".
 DEPTH_LABELS = {"deep": "DEEP", "standard": "STANDARD", "brief": "BRIEF"}
 # Repeated next to each excerpt: inline length targets are followed far more reliably than global ones.
 DEPTH_TARGETS = {
-    "deep": "write AT LEAST 160 words (up to 230) in 2-3 paragraphs, plus 4-6 keyPoints",
-    "standard": "write 50-90 words, plus 2-3 keyPoints",
-    "brief": "write 1-2 sentences, 0-1 keyPoints",
+    "deep": "write 3-4 paragraphs of 2-3 sentences each (120-180 words in total), plus 4-6 keyPoints",
+    "standard": "write 1-2 paragraphs of 2-3 sentences (40-70 words in total), plus 2-3 keyPoints",
+    "brief": "write one sentence, 0-1 keyPoints",
 }
 
 TASK_INSTRUCTIONS = {
@@ -201,6 +204,67 @@ def build_messages(ctx: dict) -> list[dict]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": render_context(ctx)},
+    ]
+
+
+MIN_DEEP_WORDS = 90  # a "deep" section shorter than this gets one expansion request
+
+_LIST_LINE = re.compile(r"^\s*(?:[-•*·]|\d+[.)])\s+")
+_LABEL_LINE = re.compile(r"^\s*(?:key\s*points?|keypoints|önemli noktalar|anahtar noktalar|notes?)\s*:?\s*$", re.IGNORECASE)
+
+
+def clean_prose(text: str) -> str:
+    """Section "content" is plain prose: drop bullet/numbered lines and stray labels such as
+    "keyPoints:" that models sometimes append, and tidy blank lines."""
+    kept = [line for line in text.splitlines() if not _LIST_LINE.match(line) and not _LABEL_LINE.match(line)]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
+def clean_note(note: dict) -> dict:
+    for sec in note.get("sections", []):
+        cleaned = clean_prose(sec.get("content", ""))
+        if cleaned:
+            sec["content"] = cleaned
+    return note
+
+EXPAND_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "sections": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+                "type": "object",
+                "properties": {"page": {"type": "integer", "minimum": 1}, "content": {"type": "string", "maxLength": 3000}},
+                "required": ["page", "content"],
+            },
+        }
+    },
+    "required": ["sections"],
+}
+
+
+def short_deep_sections(ctx: dict, note: dict) -> list[dict]:
+    """Sections on pages the reader focused on (depth "deep") that came back too short."""
+    deep_pages = {e["page"] for e in ctx["excerpts"] if e.get("depth") == "deep"}
+    return [s for s in note.get("sections", [])
+            if s.get("page") in deep_pages and len(s.get("content", "").split()) < MIN_DEEP_WORDS]
+
+
+def expand_messages(ctx: dict, sections: list[dict]) -> list[dict]:
+    """One follow-up request: rewrite only the too-short deep sections at full depth."""
+    listing = "\n".join(f"- page {s['page']} (\"{s.get('heading', '')}\"): {s.get('content', '')}" for s in sections)
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": render_context(ctx)},
+        {"role": "user", "content": (
+            "These sections are marked DEEP — the reader focused on them — but they are too short:\n"
+            f"{listing}\n\n"
+            "Rewrite the \"content\" of each one: 3-4 paragraphs of 2-3 sentences each, 120-180 words in total, "
+            "paragraphs separated by a blank line, plain prose only — no lists, no key points, no labels. "
+            "Use only that page's excerpt, start with its "
+            "CRITICAL / HIGH passages, explain the concepts, studies, numbers and examples. Same language. "
+            "Return JSON {\"sections\": [{\"page\": n, \"content\": \"...\"}]} for exactly these pages.")},
     ]
 
 

@@ -4,7 +4,7 @@
 //
 // Signals, by weight:
 //   CRITICAL_IMPORTANCE — text the reader selected (click + drag). The only pointer
-//                         interaction FocusNote uses; general mouse movement is not tracked.
+//                         interaction PiCODE uses; general mouse movement is not tracked.
 //   HIGH_RELEVANCE      — re-reading: scrolling down within a page, then back up over
 //                         the same lines and staying there for at least 1 second.
 //   weaker              — returns to a page, reading time on a page.
@@ -13,7 +13,7 @@
 //   • fast scrolling (more than one screen per second)
 //   • time after 3 minutes without any scrolling or selecting (reader likely away)
 //
-// Coarse event record (the only per-event structure FocusNote stores):
+// Coarse event record (the only per-event structure PiCODE stores):
 // {
 //   pageNumber: 3,
 //   eventType: "page_visit" | "page_revisit" | "text_selection" | "text_reread",

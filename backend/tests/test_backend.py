@@ -38,11 +38,18 @@ VALID_NOTE = {"studyNote": {
     "title": "Not", "overview": "Aralıklı çalışma hakkında.",
     "highlights": [{"text": "Aralıklı çalışma kalıcıdır.", "page": 1, "importance": "CRITICAL_IMPORTANCE",
                     "evidence": "Aralıklı çalışma akılda tutmayı artırır."}],
-    "sections": [{"heading": "Aralıklama", "page": 1, "depth": "deep", "content": "Uzun açıklama.",
+    "sections": [{"heading": "Aralıklama", "page": 1, "depth": "deep",
+                  "content": "Aralıklı çalışma uzun süreli akılda tutmayı artırır. " * 20,   # long enough for "deep"
                   "keyPoints": ["a", "b"], "evidence": "Aralıklı çalışma akılda tutmayı artırır.",
                   "readerNote": "Bu cümleyi iki kez seçtiniz.", "signal": "selection"}],
     "reviewLater": [], "questions": [],
 }}
+
+
+def note_with_short_deep_section():
+    note = json.loads(json.dumps(VALID_NOTE))
+    note["studyNote"]["sections"][0]["content"] = "Kısa bir açıklama."
+    return note
 
 
 class FakeAdapter:
@@ -106,8 +113,8 @@ class PromptTests(unittest.TestCase):
     def test_render_context_marks_depth_language_and_observations(self):
         text = prompts.render_context(context())
         self.assertIn("WRITE THE NOTE IN: Turkish", text)
-        self.assertIn("[page 1] DEPTH: DEEP (CRITICAL_IMPORTANCE, ~180s of attention) — write AT LEAST 160 words", text)
-        self.assertIn("[page 2] DEPTH: BRIEF (not read closely) — write 1-2 sentences", text)
+        self.assertIn("[page 1] DEPTH: DEEP (CRITICAL_IMPORTANCE, ~180s of attention) — write 3-4 paragraphs of 2-3 sentences each (120-180 words in total)", text)
+        self.assertIn("[page 2] DEPTH: BRIEF (not read closely) — write one sentence", text)
         self.assertIn("[signal: revisit]: returned to the page 1 times", text)
         self.assertIn("lower weight", text)
 
@@ -126,7 +133,7 @@ class PromptTests(unittest.TestCase):
         self.assertLess(block, high)
         self.assertLess(high, high_line)
         self.assertLess(high_line, excerpts)
-        for phrase in ("CRITICAL_IMPORTANCE", "HIGH_RELEVANCE", "KEY_POINT", "ONE continuous text"):
+        for phrase in ("CRITICAL_IMPORTANCE", "HIGH_RELEVANCE", "KEY_POINT", "sub-heading", "HOW MANY paragraphs", "You are PiCODE"):
             self.assertIn(phrase, prompts.SYSTEM_PROMPT)
 
     def test_context_rejects_pointer_data_shapes(self):
@@ -134,6 +141,23 @@ class PromptTests(unittest.TestCase):
         ctx["criticalPassages"][0]["importance"] = "LOW"
         r = TestClient(app_module.app).post("/api/analyze", json={"context": ctx}, headers=HOST)
         self.assertEqual(r.status_code, 422)
+
+    def test_env_prefers_picode_and_accepts_legacy_names(self):
+        import os
+        keys = ("PICODE_MODEL", "FOCUSNOTE_MODEL")
+        saved = {k: os.environ.pop(k, None) for k in keys}
+        try:
+            self.assertEqual(app_module.env("MODEL", "default"), "default")
+            os.environ["FOCUSNOTE_MODEL"] = "legacy:tag"
+            self.assertEqual(app_module.env("MODEL", "default"), "legacy:tag")
+            os.environ["PICODE_MODEL"] = "new:tag"
+            self.assertEqual(app_module.env("MODEL", "default"), "new:tag")
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None)
+                if v is not None:
+                    os.environ[k] = v
+        self.assertEqual(app_module.app.title, "PiCODE")
 
     def test_is_local_url(self):
         self.assertTrue(is_local_url("http://127.0.0.1:11434"))
@@ -178,6 +202,47 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(evs[-1]["type"], "result")
         self.assertTrue(evs[-1]["meta"]["repaired"])
         self.assertEqual(fake.calls, 2)
+
+    def test_too_short_deep_section_is_expanded_once(self):
+        long_text = "Geri çağırma belleği güçlendirir. " * 30
+        fake = FakeAdapter([json.dumps(note_with_short_deep_section()),
+                            json.dumps({"sections": [{"page": 1, "content": long_text}]})])
+        self.use(fake)
+        evs = events(self.post({"context": context()}))
+        self.assertTrue(any(e.get("phase") == "expanding" and e.get("pages") == [1] for e in evs))
+        result = evs[-1]
+        self.assertEqual(result["type"], "result")
+        self.assertEqual(result["analysis"]["studyNote"]["sections"][0]["content"], long_text.strip())
+        self.assertEqual(result["meta"]["expandedPages"], [1])
+        self.assertEqual(fake.calls, 2)
+
+    def test_section_prose_is_cleaned_of_lists_and_labels(self):
+        text = "Birinci paragraf.\n\nİkinci paragraf.\n\nkeyPoints: \n- madde bir\n- madde iki\n1. numaralı"
+        self.assertEqual(prompts.clean_prose(text), "Birinci paragraf.\n\nİkinci paragraf.")
+        self.assertEqual(prompts.clean_prose("Önemli noktalar:\n• x"), "")
+        long_text = "Geri çağırma belleği güçlendirir. " * 30
+        fake = FakeAdapter([json.dumps(note_with_short_deep_section()),
+                            json.dumps({"sections": [{"page": 1, "content": long_text + "\n\nkeyPoints:\n- leaked"}]})])
+        self.use(fake)
+        content = events(self.post({"context": context()}))[-1]["analysis"]["studyNote"]["sections"][0]["content"]
+        self.assertNotIn("keyPoints", content)
+        self.assertNotIn("leaked", content)
+
+    def test_failed_expansion_keeps_the_original_note(self):
+        fake = FakeAdapter([json.dumps(note_with_short_deep_section()), "not json"])
+        self.use(fake)
+        result = events(self.post({"context": context()}))[-1]
+        self.assertEqual(result["type"], "result")
+        self.assertEqual(result["analysis"]["studyNote"]["sections"][0]["content"], "Kısa bir açıklama.")
+        self.assertEqual(result["meta"]["expandedPages"], [])
+
+    def test_brief_sections_are_never_expanded(self):
+        note = note_with_short_deep_section()
+        note["studyNote"]["sections"][0]["page"] = 2   # page 2 is "brief" in the context
+        fake = FakeAdapter([json.dumps(note)])
+        self.use(fake)
+        self.assertEqual(events(self.post({"context": context()}))[-1]["type"], "result")
+        self.assertEqual(fake.calls, 1)
 
     def test_gives_up_after_one_repair(self):
         fake = FakeAdapter(["not json", '{"studyNote": {"title": 1}}'])

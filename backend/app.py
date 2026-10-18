@@ -1,4 +1,4 @@
-"""FocusNote backend: serves the static frontend and is the only component
+"""PiCODE backend: serves the static frontend and is the only component
 that talks to the model runtime.
 
 Why a backend at all? Browsers must load PDF.js modules over http (not file://),
@@ -26,7 +26,8 @@ from . import prompts
 from .model_adapter import ADAPTERS, ModelConfig, ModelError, is_local_url, make_adapter
 
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG_FILE = Path(__file__).resolve().parent / "focusnote.config.json"  # git-ignored
+CONFIG_FILE = Path(__file__).resolve().parent / "picode.config.json"  # git-ignored
+LEGACY_CONFIG_FILE = CONFIG_FILE.with_name("focusnote.config.json")  # name used before the rename
 MAX_CONTEXT_CHARS = 22000
 MAX_OUTPUT_TOKENS = {"note": 3200}  # deep sections are long; Turkish also needs more tokens per word
 MAX_BODY_BYTES = 200_000
@@ -34,18 +35,24 @@ MAX_BODY_BYTES = 200_000
 
 # ---------------------------------------------------------------- configuration
 
+def env(name: str, default: str) -> str:
+    """PICODE_<name>, falling back to the pre-rename FOCUSNOTE_<name>."""
+    return os.getenv(f"PICODE_{name}") or os.getenv(f"FOCUSNOTE_{name}") or default
+
+
 def load_config() -> ModelConfig:
     cfg = ModelConfig(
-        runtime=os.getenv("FOCUSNOTE_RUNTIME", "ollama"),
-        base_url=os.getenv("FOCUSNOTE_MODEL_BASE_URL", "http://127.0.0.1:11434"),
-        model=os.getenv("FOCUSNOTE_MODEL", "gemma4:12b"),
-        timeout_s=float(os.getenv("FOCUSNOTE_TIMEOUT", "300")),
-        num_ctx=int(os.getenv("FOCUSNOTE_NUM_CTX", "8192")),
-        api_key=os.getenv("FOCUSNOTE_API_KEY", ""),
+        runtime=env("RUNTIME", "ollama"),
+        base_url=env("MODEL_BASE_URL", "http://127.0.0.1:11434"),
+        model=env("MODEL", "gemma4:12b"),
+        timeout_s=float(env("TIMEOUT", "300")),
+        num_ctx=int(env("NUM_CTX", "8192")),
+        api_key=env("API_KEY", ""),
     )
-    if CONFIG_FILE.exists():  # values saved from the settings dialog
+    source = CONFIG_FILE if CONFIG_FILE.exists() else LEGACY_CONFIG_FILE
+    if source.exists():  # values saved from the settings dialog
         try:
-            saved = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            saved = json.loads(source.read_text(encoding="utf-8"))
             cfg.runtime = saved.get("runtime", cfg.runtime)
             cfg.base_url = saved.get("baseUrl", cfg.base_url)
             cfg.model = saved.get("model", cfg.model)
@@ -143,7 +150,7 @@ class ConfigUpdate(BaseModel):
 
 # ---------------------------------------------------------------- app
 
-app = FastAPI(title="FocusNote", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="PiCODE", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 @app.middleware("http")
@@ -213,6 +220,27 @@ async def _collect(adapter, messages, schema, max_tokens) -> str:
     return "".join([piece async for piece in adapter.stream_chat(messages, schema, max_tokens)])
 
 
+async def _expand(adapter, ctx: dict, short: list[dict]) -> list[int]:
+    """One expansion request for too-short deep sections; replaces their content in place.
+    Any failure keeps the original note. Returns the pages that were expanded."""
+    try:
+        raw = await _collect(adapter, prompts.expand_messages(ctx, short), prompts.EXPAND_SCHEMA, 1600)
+        data, errors = _parse(raw, prompts.EXPAND_SCHEMA)
+    except ModelError:
+        return []
+    if data is None:
+        return []
+    by_page = {s["page"]: s for s in short}
+    done = []
+    for item in data["sections"]:
+        sec = by_page.get(item["page"])
+        content = prompts.clean_prose(item["content"])
+        if sec is not None and len(content.split()) > len(sec.get("content", "").split()):
+            sec["content"] = content
+            done.append(item["page"])
+    return sorted(set(done))
+
+
 def _parse(raw: str, schema: dict) -> tuple[Optional[dict], list[str]]:
     try:
         data = json.loads(raw)
@@ -271,10 +299,17 @@ async def analyze(raw_request: Request):
                                "message": "The model returned output that does not match the schema, "
                                           "even after one repair attempt.", "details": errors[:5]})
                 return
+            prompts.clean_note(data.get("studyNote", {}))
+            # Depth guarantee: pages the reader focused on must not come back as a one-liner.
+            expanded = []
+            short = prompts.short_deep_sections(ctx, data.get("studyNote", {}))
+            if short:
+                yield _ndjson({"type": "status", "phase": "expanding", "pages": [s["page"] for s in short]})
+                expanded = await _expand(adapter, ctx, short)
             yield _ndjson({"type": "result", "task": ctx["task"], "analysis": data,
                            "meta": {"runtime": CONFIG.runtime, "model": CONFIG.model,
                                     "durationSeconds": round(time.monotonic() - started, 1),
-                                    "repaired": repaired, "promptChars": len(rendered),
+                                    "repaired": repaired, "expandedPages": expanded, "promptChars": len(rendered),
                                     "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}})
         except ModelError as e:
             yield _ndjson({"type": "error", "code": e.code, "message": e.message})
